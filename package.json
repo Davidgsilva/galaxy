@@ -1,0 +1,90 @@
+{
+  "name": "beacon-yocto-cli",
+  "version": "1.0.0",
+  "description": "AI-powered CLI tool for Yocto Project embedded development with silicon-specific intelligence",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js",
+    "cli": "node cli/index.js",
+    "test": "jest",
+    "test:yocto": "jest tests/yocto/",
+    "lint": "eslint .",
+    "build": "npm run build:server && npm run build:cli",
+    "build:server": "echo 'Server build complete'",
+    "build:cli": "pkg cli/index.js --out-path dist",
+    "setup": "node scripts/setup.js",
+    "update-silicon-db": "node scripts/update-silicon-database.js"
+  },
+  "bin": {
+    "beacon": "./cli/index.js"
+  },
+  "keywords": [
+    "yocto", "embedded", "bsp", "ai", "anthropic", "linux", 
+    "cross-compile", "bitbake", "openembedded", "silicon",
+    "imx", "zynq", "ti", "automotive", "iot"
+  ],
+  "author": "Beacon Yocto Team",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.3",
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "rate-limiter-flexible": "^5.0.3",
+    "commander": "^12.1.0",
+    "axios": "^1.7.2",
+    "chalk": "^4.1.2",
+    "ora": "^5.4.1",
+    "inquirer": "^8.2.6",
+    "fs-extra": "^11.2.0",
+    "path": "^0.12.7",
+    "dotenv": "^16.4.5",
+    "winston": "^3.13.0",
+    "node-cache": "^5.1.2",
+    "glob": "^10.3.10",
+    "yaml": "^2.4.2",
+    "semver": "^7.6.0",
+    "git-url-parse": "^14.0.0",
+    "simple-git": "^3.19.1",
+    "node-cron": "^3.0.3",
+    "lockfile": "^1.0.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4",
+    "jest": "^29.7.0",
+    "eslint": "^8.57.0",
+    "pkg": "^5.8.1",
+    "@types/node": "^20.14.10",
+    "supertest": "^6.3.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/beacon-yocto/beacon-cli.git"
+  },
+  "yocto": {
+    "supportedLayers": [
+      "meta-openembedded",
+      "meta-freescale",
+      "meta-xilinx", 
+      "meta-ti",
+      "meta-raspberrypi",
+      "meta-intel",
+      "meta-arm",
+      "meta-security",
+      "meta-virtualization"
+    ],
+    "supportedMachines": [
+      "imx8mm-evk", "imx8mp-evk", "imx8mn-evk", "imx6ul-evk",
+      "zynqmp-generic", "versal-generic", "ultra96-zynqmp",
+      "am64xx-evm", "am62xx-evm", "beaglebone-yocto",
+      "raspberrypi4-64", "raspberrypi3-64", 
+      "genericx86-64", "intel-corei7-64"
+    ],
+    "defaultDistro": "poky",
+    "ltsReleases": ["kirkstone", "scarthgap", "styhead"]
+  }
+}

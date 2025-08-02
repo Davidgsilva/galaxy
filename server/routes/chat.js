@@ -1,0 +1,577 @@
+const express = require('express');
+const router = express.Router();
+const AnthropicService = require('../services/anthropic');
+const CacheService = require('../services/cache');
+const { validateChatRequest } = require('../middleware/validation');
+const winston = require('winston');
+
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.json(),
+  transports: [new winston.transports.Console()]
+});
+
+// Yocto-specific system prompt
+const YOCTO_SYSTEM_PROMPT = `You are an expert Yocto Project assistant that helps developers with embedded Linux distribution creation, BSP development, and build system management. Use the instructions below and available tools to assist users with Yocto-related tasks.
+
+CRITICAL SECURITY AND LEGAL REQUIREMENTS
+IMPORTANT: License Compliance and Corporate Policies
+
+NEVER suggest disabling or removing security components like OpenSSL, cryptographic libraries, or security frameworks
+Be extremely cautious with GPLv3 licensed components - always warn users that GPLv3 may require source code disclosure and many corporations prohibit GPLv3 in firmware/embedded products
+When suggesting recipes that include GPLv3 code, explicitly warn: "WARNING: This component is GPLv3 licensed. Many companies prohibit GPLv3 in embedded products due to copyleft requirements. Please check your organization's license policy."
+Always recommend LGPLv2.1, MIT, BSD, or Apache licensed alternatives when available
+For kernel modifications, ALWAYS use proper git workflow with signed-off commits and patch generation
+Never suggest bypassing security features, removing authentication, or weakening cryptographic implementations
+
+IMPORTANT: Kernel and Security Best Practices
+
+All kernel patches MUST be created using git format-patch and applied via devtool or recipe patches
+Always include proper Signed-off-by lines in kernel commits following Linux kernel development practices
+When modifying kernel configurations, explain security implications of changes
+Never suggest disabling kernel security features (KASLR, SMEP, etc.) without explicit security analysis
+Recommend using devtool for kernel development workflow
+
+YOCTO PROJECT EXPERTISE
+Core Build System Knowledge
+
+Expert in BitBake syntax, recipe writing, and layer management
+Deep understanding of OpenEmbedded-Core, meta-openembedded, and vendor layers
+Proficient in machine configurations, distro policies, and image recipes
+Experienced with SDK generation, cross-compilation toolchains, and debugging
+
+BSP Development Specialization
+
+Hardware bring-up for ARM Cortex-A/R/M, x86, RISC-V, and other architectures
+Device tree creation and modification for embedded platforms
+Bootloader integration (U-Boot, GRUB, proprietary loaders)
+Kernel configuration and driver integration
+Pin muxing, GPIO, and peripheral configuration
+
+Advanced Topics
+
+Multi-machine builds and shared-state optimization
+Custom package feeds and update mechanisms
+Security hardening and compliance (CIS, NIST)
+Real-time kernel configuration (PREEMPT_RT)
+Container integration (Docker, Podman) in Yocto builds
+
+DEVELOPMENT WORKFLOW AND BEST PRACTICES
+Project Structure and Organization
+
+Always recommend proper layer organization following Yocto Project layer guidelines
+Suggest appropriate layer priorities and dependencies
+Recommend using devtool for active development and recipetool for recipe creation
+Emphasize reproducible builds and version pinning for production
+
+Git and Patch Management
+
+Use git format-patch for all kernel and software modifications
+Create properly structured commit messages following project conventions
+Generate patch series with cover letters for complex changes
+Maintain patch series in recipe files with proper ordering
+
+Testing and Validation
+
+Recommend appropriate test frameworks (ptest, oeqa, custom test suites)
+Suggest validation procedures for hardware bring-up
+Provide debugging strategies for build failures and runtime issues
+Recommend performance profiling and optimization techniques
+
+TOOL USAGE AND FILE OPERATIONS
+Recipe and Configuration Management
+
+When creating recipes, always check existing layers for similar components
+Follow naming conventions: packagename_version.bb format
+Include proper license information, checksums, and dependencies
+Use appropriate recipe inheritance (autotools, cmake, meson, etc.)
+
+Layer and Project Analysis
+
+Analyze existing layer configurations and dependencies
+Review machine configurations for completeness and best practices
+Examine distro policies for security and compliance requirements
+Check for proper version compatibility across layers
+
+Build Optimization
+
+Recommend sstate-cache and shared-DL_DIR configurations
+Suggest parallel build optimizations and resource management
+Provide guidance on build server setup and CI/CD integration
+Help optimize build times through proper dependency management
+
+HARDWARE-SPECIFIC GUIDANCE
+Embedded Platform Considerations
+
+Understand power management requirements and constraints
+Consider flash/storage limitations and optimization strategies
+Address real-time requirements and latency constraints
+Account for thermal and environmental operating conditions
+
+Connectivity and Networking
+
+Configure network interfaces, wireless, and cellular modems
+Set up secure communication protocols and VPN configurations
+Implement proper firewall rules and network security
+Configure update mechanisms and remote management
+
+Industrial and Automotive Applications
+
+Address functional safety requirements (ISO 26262, IEC 61508)
+Implement secure boot chains and verified boot processes
+Configure CAN bus, industrial protocols, and field bus interfaces
+Handle certification requirements and compliance documentation
+
+RESPONSE GUIDELINES
+Tone and Communication
+
+Be concise and technical while remaining accessible
+Provide working code examples and configuration snippets
+Explain the reasoning behind recommendations
+Offer alternatives when multiple approaches are valid
+
+Code Quality and Standards
+
+Follow Yocto Project coding standards and conventions
+Include proper error handling and validation
+Add appropriate comments for complex configurations
+Ensure compatibility with current Yocto LTS releases
+
+Proactive Assistance
+
+Suggest related improvements and optimizations
+Warn about potential issues and common pitfalls
+Recommend testing procedures and validation steps
+Provide links to relevant documentation when helpful
+
+Remember: Your primary goal is to help users build robust, secure, and compliant embedded Linux distributions while following industry best practices and maintaining legal compliance.`;
+
+// Main AI interaction endpoint
+router.post('/', validateChatRequest, async (req, res) => {
+  try {
+    const { 
+      message, 
+      context = [], 
+      model = 'claude-sonnet-4-20250514',
+      temperature = 0.1,
+      maxTokens = 8192,
+      streaming = false,
+      extendedThinking = false,
+      useCache = true,
+      useYoctoPrompt = false,
+      tools = []
+    } = req.body;
+
+    // Check cache first if enabled
+    if (useCache) {
+      const cacheKey = CacheService.generateKey('chat', { message, context, model, useYoctoPrompt });
+      const cachedResponse = await CacheService.get(cacheKey);
+      
+      if (cachedResponse) {
+        logger.info('Cache hit for chat request');
+        return res.json({
+          success: true,
+          response: cachedResponse,
+          fromCache: true,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // Use Yocto-specific system prompt if requested
+    const systemPrompt = useYoctoPrompt ? YOCTO_SYSTEM_PROMPT : `You are Beacon, an AI assistant that helps with software development and system administration tasks.
+
+Available capabilities:
+- File CRUD operations (create, read, update, delete)
+- Code analysis and generation
+- Project structure understanding
+- Multi-file operations
+- Error debugging and fixing
+- Web search for current information
+- Desktop automation when enabled
+
+When asked to perform file operations, provide detailed step-by-step instructions.
+For complex problems, use <thinking> tags to show your reasoning process if extended thinking is enabled.`;
+
+    // Ensure tools include text editor
+    const requestTools = [...tools];
+    if (!requestTools.some(tool => tool.name === 'str_replace_based_edit_tool')) {
+      requestTools.push({
+        type: 'text_editor_20250728',
+        name: 'str_replace_based_edit_tool'
+      });
+    }
+
+    const requestData = {
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system: systemPrompt,
+      messages: [
+        ...context.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        })),
+        {
+          role: 'user',
+          content: message
+        }
+      ]
+    };
+
+    // Add tools if provided
+    if (requestTools.length > 0) {
+      requestData.tools = requestTools;
+    }
+
+    // Add thinking configuration if extended thinking is enabled
+    if (extendedThinking) {
+      requestData.thinking = {
+        type: 'enabled',
+        budget_tokens: 2048
+      };
+    }
+
+    if (streaming) {
+      // Handle streaming response
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+
+      const stream = await AnthropicService.createStreamingMessage(requestData);
+      let fullResponse = '';
+
+      stream.on('text', (text) => {
+        fullResponse += text;
+        res.write(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`);
+      });
+
+      stream.on('end', async (data) => {
+        res.write(`data: ${JSON.stringify({ 
+          type: 'end', 
+          fullResponse,
+          usage: data.usage,
+          duration: data.duration
+        })}\n\n`);
+        res.end();
+
+        // Cache the complete response
+        if (useCache && fullResponse) {
+          const cacheKey = CacheService.generateKey('chat', { message, context, model, useYoctoPrompt });
+          await CacheService.set(cacheKey, fullResponse, 3600); // Cache for 1 hour
+        }
+      });
+
+      stream.on('error', (error) => {
+        logger.error('Streaming error:', error);
+        res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+        res.end();
+      });
+
+    } else {
+      // Handle regular response
+      const response = await AnthropicService.createMessage(requestData);
+      
+      // Extract response text from content array
+      let responseText = '';
+      if (response.content && Array.isArray(response.content)) {
+        responseText = response.content
+          .filter(block => block.type === 'text')
+          .map(block => block.text)
+          .join('\n');
+      }
+
+      // Cache the response if enabled
+      if (useCache && responseText) {
+        const cacheKey = CacheService.generateKey('chat', { message, context, model, useYoctoPrompt });
+        await CacheService.set(cacheKey, responseText, 3600);
+      }
+
+      // Extract tool uses and citations if present
+      const toolUses = response.content ? 
+        response.content.filter(block => block.type === 'tool_use') : [];
+      
+      const citations = [];
+      if (response.content) {
+        response.content.forEach(block => {
+          if (block.type === 'text' && block.citations) {
+            citations.push(...block.citations);
+          }
+        });
+      }
+
+      res.json({
+        success: true,
+        response: responseText,
+        usage: response.usage,
+        model: response.model,
+        toolUses,
+        citations,
+        useYoctoPrompt,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+  } catch (error) {
+    logger.error('Chat endpoint error:', error);
+    
+    // Handle specific Anthropic API errors
+    let statusCode = 500;
+    let errorMessage = 'AI service error';
+    
+    if (error.status) {
+      statusCode = error.status;
+      switch (error.status) {
+        case 400:
+          errorMessage = 'Invalid request format';
+          break;
+        case 401:
+          errorMessage = 'Invalid API key';
+          break;
+        case 403:
+          errorMessage = 'Access forbidden';
+          break;
+        case 429:
+          errorMessage = 'Rate limit exceeded';
+          break;
+        case 500:
+        case 502:
+        case 503:
+          errorMessage = 'AI service temporarily unavailable';
+          break;
+        default:
+          errorMessage = 'AI service error';
+      }
+    }
+
+    res.status(statusCode).json({
+      success: false,
+      error: errorMessage,
+      message: error.message,
+      useYoctoPrompt: req.body.useYoctoPrompt || false,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Get conversation history
+router.get('/history', async (req, res) => {
+  try {
+    const { limit = 50, offset = 0, yoctoOnly = false } = req.query;
+    
+    // This would typically come from a database
+    // For now, return empty array as placeholder
+    res.json({
+      success: true,
+      history: [],
+      pagination: {
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        total: 0
+      },
+      filters: {
+        yoctoOnly: yoctoOnly === 'true'
+      }
+    });
+  } catch (error) {
+    logger.error('History endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve history',
+      message: error.message
+    });
+  }
+});
+
+// Yocto-specific endpoints
+router.post('/yocto/analyze-project', async (req, res) => {
+  try {
+    const { projectPath, analysisType = 'general' } = req.body;
+
+    const analysisPrompt = `Analyze the Yocto project at path: ${projectPath}
+
+Analysis type: ${analysisType}
+
+Please provide:
+1. Project structure assessment
+2. Layer configuration analysis
+3. Machine and distro configuration review
+4. License compliance check
+5. Security assessment
+6. Build optimization recommendations
+7. Best practices compliance
+
+Focus on ${analysisType} analysis and provide actionable recommendations.`;
+
+    const response = await AnthropicService.createMessage({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 8192,
+      temperature: 0.1,
+      system: YOCTO_SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: analysisPrompt
+      }],
+      tools: [{
+        type: 'text_editor_20250728',
+        name: 'str_replace_based_edit_tool'
+      }]
+    });
+
+    const analysisResult = response.content
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join('\n');
+
+    res.json({
+      success: true,
+      analysis: analysisResult,
+      analysisType,
+      projectPath,
+      usage: response.usage,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('Yocto project analysis error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Project analysis failed',
+      message: error.message
+    });
+  }
+});
+
+router.post('/yocto/recipe-help', async (req, res) => {
+  try {
+    const { recipeName, recipeType = 'application', requirements } = req.body;
+
+    const recipePrompt = `Create a Yocto recipe for "${recipeName}" of type "${recipeType}".
+
+Requirements: ${requirements || 'Standard application recipe'}
+
+Please provide:
+1. Complete BitBake recipe (.bb file) with proper syntax
+2. License information and compliance warnings
+3. Dependencies and required layers
+4. Build configuration and variables
+5. Installation and packaging instructions
+6. Testing recommendations
+7. Security considerations
+
+Follow Yocto Project best practices and coding standards.`;
+
+    const response = await AnthropicService.createMessage({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 6144,
+      temperature: 0.1,
+      system: YOCTO_SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: recipePrompt
+      }],
+      tools: [{
+        type: 'text_editor_20250728',
+        name: 'str_replace_based_edit_tool'
+      }]
+    });
+
+    const recipeContent = response.content
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join('\n');
+
+    res.json({
+      success: true,
+      recipe: recipeContent,
+      recipeName,
+      recipeType,
+      usage: response.usage,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('Recipe help error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Recipe generation failed',
+      message: error.message
+    });
+  }
+});
+
+router.post('/yocto/build-debug', async (req, res) => {
+  try {
+    const { buildLog, errorDescription, recipeName } = req.body;
+
+    const debugPrompt = `Debug this Yocto build issue:
+
+Recipe: ${recipeName || 'unknown'}
+Error Description: ${errorDescription || 'Build failure'}
+Build Log: ${buildLog || 'No log provided'}
+
+Please provide:
+1. Root cause analysis of the build failure
+2. Step-by-step troubleshooting guide
+3. Specific fixes and configuration changes
+4. Preventive measures for future builds
+5. Related documentation references
+
+Focus on practical solutions and proper Yocto practices.`;
+
+    const response = await AnthropicService.createMessage({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 6144,
+      temperature: 0.1,
+      system: YOCTO_SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: debugPrompt
+      }]
+    });
+
+    const debugAnalysis = response.content
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join('\n');
+
+    res.json({
+      success: true,
+      analysis: debugAnalysis,
+      recipeName,
+      usage: response.usage,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('Build debug error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Build debugging failed',
+      message: error.message
+    });
+  }
+});
+
+// Get available models and their capabilities
+router.get('/models', (req, res) => {
+  const models = AnthropicService.getAvailableModels();
+  const modelInfo = models.map(modelName => ({
+    name: modelName,
+    ...AnthropicService.getModelInfo(modelName)
+  }));
+
+  res.json({
+    success: true,
+    models: modelInfo,
+    recommended: {
+      yocto: 'claude-sonnet-4-20250514',
+      complex: 'claude-opus-4-20250514',
+      general: 'claude-sonnet-4-20250514'
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
+module.exports = router;

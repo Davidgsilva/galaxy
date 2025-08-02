@@ -1,0 +1,465 @@
+{
+  "platforms": {
+    "nxp": {
+      "name": "NXP Semiconductors",
+      "description": "ARM-based processors for automotive, industrial, and IoT applications",
+      "website": "https://www.nxp.com",
+      "architectures": ["arm", "arm64"],
+      "series": {
+        "imx6": {
+          "name": "i.MX 6 Series",
+          "description": "Single and multi-core ARM Cortex-A9 processors",
+          "architecture": "arm",
+          "cores": ["cortex-a9"],
+          "machines": {
+            "imx6ul-evk": {
+              "name": "i.MX6UL EVK",
+              "soc": "i.MX6UL",
+              "cores": 1,
+              "frequency": "528MHz",
+              "memory": "512MB DDR3",
+              "storage": "8GB eMMC",
+              "features": ["ethernet", "usb", "spi", "i2c", "uart", "gpio"],
+              "bsp_layer": "meta-freescale",
+              "defconfig": "imx_v6_v7_defconfig",
+              "devicetree": "imx6ul-14x14-evk.dts"
+            }
+          }
+        },
+        "imx8m": {
+          "name": "i.MX 8M Series",
+          "description": "Quad-core ARM Cortex-A53 with Cortex-M4 co-processor",
+          "architecture": "arm64",
+          "cores": ["cortex-a53", "cortex-m4"],
+          "machines": {
+            "imx8mm-evk": {
+              "name": "i.MX8M Mini EVK",
+              "soc": "i.MX8MM",
+              "cores": 4,
+              "frequency": "1.8GHz",
+              "memory": "4GB LPDDR4",
+              "storage": "16GB eMMC",
+              "gpu": "ARM Mali-G31 MP2",
+              "features": ["pcie", "ethernet", "usb3", "mipi-dsi", "mipi-csi", "can-fd", "wifi", "bluetooth"],
+              "bsp_layer": "meta-freescale",
+              "defconfig": "imx_v8_defconfig",
+              "devicetree": "imx8mm-evk.dts",
+              "bootloader": "u-boot-imx",
+              "vendor_tools": ["mfgtools", "uuu"]
+            },
+            "imx8mp-evk": {
+              "name": "i.MX8M Plus EVK",
+              "soc": "i.MX8MP",
+              "cores": 4,
+              "frequency": "1.8GHz",
+              "memory": "6GB LPDDR4",
+              "storage": "32GB eMMC",
+              "gpu": "ARM Mali-G31 MP2",
+              "npu": "2.3 TOPS ML accelerator",
+              "features": ["pcie", "ethernet", "usb3", "mipi-dsi", "mipi-csi", "can-fd", "wifi", "bluetooth", "ai-acceleration"],
+              "bsp_layer": "meta-freescale",
+              "defconfig": "imx_v8_defconfig",
+              "devicetree": "imx8mp-evk.dts",
+              "bootloader": "u-boot-imx",
+              "vendor_tools": ["mfgtools", "uuu", "eiq-toolkit"]
+            }
+          }
+        }
+      },
+      "layers": {
+        "meta-freescale": {
+          "description": "NXP/Freescale BSP layer",
+          "git_url": "https://github.com/Freescale/meta-freescale.git",
+          "branch_mapping": {
+            "kirkstone": "kirkstone",
+            "scarthgap": "scarthgap",
+            "styhead": "styhead"
+          },
+          "dependencies": ["meta-openembedded"]
+        },
+        "meta-freescale-3rdparty": {
+          "description": "3rd party board support for NXP platforms",
+          "git_url": "https://github.com/Freescale/meta-freescale-3rdparty.git",
+          "dependencies": ["meta-freescale"]
+        }
+      },
+      "compliance": {
+        "automotive": ["ISO26262"],
+        "industrial": ["IEC61508"],
+        "security": ["CC-EAL4+"]
+      }
+    },
+    "xilinx": {
+      "name": "AMD Xilinx",
+      "description": "Adaptive SoCs and FPGAs with ARM processing systems",
+      "website": "https://www.xilinx.com",
+      "architectures": ["arm", "arm64"],
+      "series": {
+        "zynq": {
+          "name": "Zynq-7000 Series",
+          "description": "Dual-core ARM Cortex-A9 with FPGA fabric",
+          "architecture": "arm",
+          "cores": ["cortex-a9"],
+          "machines": {
+            "zc702-zynq7": {
+              "name": "ZC702 Evaluation Board",
+              "soc": "XC7Z020",
+              "cores": 2,
+              "frequency": "866MHz",
+              "memory": "1GB DDR3",
+              "fpga": "Artix-7 FPGA",
+              "features": ["ethernet", "usb", "uart", "can", "spi", "i2c", "gpio", "fpga"],
+              "bsp_layer": "meta-xilinx",
+              "defconfig": "xilinx_zynq_defconfig",
+              "devicetree": "zynq-zc702.dts"
+            }
+          }
+        },
+        "zynqmp": {
+          "name": "Zynq UltraScale+ MPSoCs",
+          "description": "Quad-core ARM Cortex-A53 with dual Cortex-R5 and FPGA",
+          "architecture": "arm64",
+          "cores": ["cortex-a53", "cortex-r5"],
+          "machines": {
+            "zynqmp-generic": {
+              "name": "Zynq UltraScale+ Generic",
+              "soc": "XCZU9EG",
+              "cores": 4,
+              "frequency": "1.5GHz",
+              "memory": "4GB DDR4",
+              "fpga": "UltraScale+ FPGA",
+              "features": ["pcie", "ethernet", "usb3", "displayport", "can", "uart", "fpga", "ai-engine"],
+              "bsp_layer": "meta-xilinx",
+              "defconfig": "xilinx_zynqmp_defconfig",
+              "devicetree": "zynqmp-generic.dts",
+              "bootloader": "u-boot-xlnx"
+            },
+            "ultra96-zynqmp": {
+              "name": "Ultra96 Board",
+              "soc": "XCZU3EG",
+              "cores": 4,
+              "frequency": "1.5GHz",
+              "memory": "2GB DDR4",
+              "fpga": "UltraScale+ FPGA",
+              "features": ["wifi", "bluetooth", "usb", "mipi-csi", "fpga"],
+              "bsp_layer": "meta-xilinx",
+              "defconfig": "xilinx_zynqmp_defconfig",
+              "devicetree": "avnet-ultra96-rev1.dts"
+            }
+          }
+        }
+      },
+      "layers": {
+        "meta-xilinx": {
+          "description": "Xilinx BSP layer for Zynq and UltraScale+ devices",
+          "git_url": "https://github.com/Xilinx/meta-xilinx.git",
+          "branch_mapping": {
+            "kirkstone": "rel-v2022.1",
+            "scarthgap": "rel-v2024.1",
+            "styhead": "master"
+          },
+          "dependencies": ["meta-openembedded"]
+        },
+        "meta-xilinx-tools": {
+          "description": "Xilinx development tools integration",
+          "git_url": "https://github.com/Xilinx/meta-xilinx-tools.git",
+          "dependencies": ["meta-xilinx"]
+        }
+      },
+      "vendor_tools": ["vivado", "vitis", "xsct", "bootgen"],
+      "compliance": {
+        "automotive": ["ISO26262"],
+        "aerospace": ["DO-254"],
+        "industrial": ["IEC61508"]
+      }
+    },
+    "ti": {
+      "name": "Texas Instruments",
+      "description": "ARM-based Sitara processors for industrial and automotive applications",
+      "website": "https://www.ti.com",
+      "architectures": ["arm", "arm64"],
+      "series": {
+        "am335x": {
+          "name": "AM335x Sitara",
+          "description": "Single-core ARM Cortex-A8 processor",
+          "architecture": "arm",
+          "cores": ["cortex-a8"],
+          "machines": {
+            "beaglebone-yocto": {
+              "name": "BeagleBone Black",
+              "soc": "AM3358",
+              "cores": 1,
+              "frequency": "1GHz",
+              "memory": "512MB DDR3",
+              "storage": "4GB eMMC",
+              "features": ["ethernet", "usb", "can", "uart", "spi", "i2c", "gpio"],
+              "bsp_layer": "meta-ti",
+              "defconfig": "omap2plus_defconfig",
+              "devicetree": "am335x-boneblack.dts"
+            }
+          }
+        },
+        "am64x": {
+          "name": "AM64x Sitara",
+          "description": "Dual-core ARM Cortex-A53 with dual Cortex-R5F",
+          "architecture": "arm64",
+          "cores": ["cortex-a53", "cortex-r5f"],
+          "machines": {
+            "am64xx-evm": {
+              "name": "AM64x EVM",
+              "soc": "AM6442",
+              "cores": 2,
+              "frequency": "1.4GHz",
+              "memory": "2GB DDR4",
+              "features": ["pcie", "ethernet", "usb3", "can-fd", "tsi", "uart", "industrial-ethernet"],
+              "bsp_layer": "meta-ti",
+              "defconfig": "defconfig",
+              "devicetree": "k3-am642-evm.dts",
+              "bootloader": "u-boot-ti"
+            }
+          }
+        },
+        "am62x": {
+          "name": "AM62x Sitara",
+          "description": "Quad-core ARM Cortex-A53 with Cortex-M4F",
+          "architecture": "arm64",
+          "cores": ["cortex-a53", "cortex-m4f"],
+          "machines": {
+            "am62xx-evm": {
+              "name": "AM62x SK EVM",
+              "soc": "AM6254",
+              "cores": 4,
+              "frequency": "1.4GHz",
+              "memory": "4GB LPDDR4",
+              "gpu": "PowerVR SGX544",
+              "features": ["ethernet", "usb3", "mipi-dsi", "mipi-csi", "can-fd", "wifi", "bluetooth"],
+              "bsp_layer": "meta-ti",
+              "defconfig": "defconfig",
+              "devicetree": "k3-am625-sk.dts",
+              "bootloader": "u-boot-ti"
+            }
+          }
+        }
+      },
+      "layers": {
+        "meta-ti": {
+          "description": "Texas Instruments BSP layer",
+          "git_url": "https://git.yoctoproject.org/meta-ti",
+          "branch_mapping": {
+            "kirkstone": "kirkstone",
+            "scarthgap": "scarthgap",
+            "styhead": "styhead"
+          },
+          "dependencies": ["meta-arm"]
+        }
+      },
+      "vendor_tools": ["ti-cgt", "ti-pdk", "code-composer-studio"],
+      "compliance": {
+        "automotive": ["ISO26262"],
+        "industrial": ["IEC61508", "IEC61850"],
+        "functional_safety": ["SIL-3"]
+      }
+    },
+    "broadcom": {
+      "name": "Broadcom",
+      "description": "ARM-based SoCs popular in single-board computers",
+      "website": "https://www.broadcom.com",
+      "architectures": ["arm", "arm64"],
+      "series": {
+        "bcm283x": {
+          "name": "BCM283x Series",
+          "description": "ARM processors used in Raspberry Pi boards",
+          "architecture": "arm64",
+          "cores": ["cortex-a72", "cortex-a53"],
+          "machines": {
+            "raspberrypi4-64": {
+              "name": "Raspberry Pi 4 Model B",
+              "soc": "BCM2711",
+              "cores": 4,
+              "frequency": "1.8GHz",
+              "memory": "8GB LPDDR4",
+              "gpu": "VideoCore VI",
+              "features": ["ethernet", "wifi", "bluetooth", "usb3", "mipi-csi", "gpio", "4k-video"],
+              "bsp_layer": "meta-raspberrypi",
+              "defconfig": "bcm2711_defconfig",
+              "devicetree": "bcm2711-rpi-4-b.dts",
+              "bootloader": "u-boot-rpi"
+            },
+            "raspberrypi3-64": {
+              "name": "Raspberry Pi 3 Model B+",
+              "soc": "BCM2837B0",
+              "cores": 4,
+              "frequency": "1.4GHz",
+              "memory": "1GB LPDDR2",
+              "gpu": "VideoCore IV",
+              "features": ["ethernet", "wifi", "bluetooth", "usb2", "mipi-csi", "gpio"],
+              "bsp_layer": "meta-raspberrypi",
+              "defconfig": "bcm2709_defconfig",
+              "devicetree": "bcm2837-rpi-3-b-plus.dts"
+            }
+          }
+        }
+      },
+      "layers": {
+        "meta-raspberrypi": {
+          "description": "Raspberry Pi BSP layer",
+          "git_url": "https://git.yoctoproject.org/meta-raspberrypi",
+          "branch_mapping": {
+            "kirkstone": "kirkstone",
+            "scarthgap": "scarthgap",
+            "styhead": "styhead"
+          },
+          "dependencies": []
+        }
+      },
+      "vendor_tools": ["rpi-imager", "vcgencmd"],
+      "compliance": {
+        "educational": ["CE", "FCC"],
+        "commercial": ["RoHS", "REACH"]
+      }
+    },
+    "intel": {
+      "name": "Intel Corporation",
+      "description": "x86/x64 processors for embedded and edge computing",
+      "website": "https://www.intel.com",
+      "architectures": ["x86", "x86_64"],
+      "series": {
+        "atom": {
+          "name": "Intel Atom",
+          "description": "Low-power x86 processors for embedded applications",
+          "architecture": "x86_64",
+          "cores": ["atom"],
+          "machines": {
+            "intel-corei7-64": {
+              "name": "Intel Core i7 64-bit",
+              "soc": "Various Core i7",
+              "cores": 4,
+              "frequency": "2.4GHz+",
+              "memory": "8GB+ DDR4",
+              "features": ["pcie", "ethernet", "usb3", "sata", "wifi", "bluetooth", "virtualization"],
+              "bsp_layer": "meta-intel",
+              "defconfig": "x86_64_defconfig",
+              "bootloader": "systemd-boot"
+            },
+            "genericx86-64": {
+              "name": "Generic x86-64",
+              "soc": "Generic x86_64",
+              "features": ["pcie", "ethernet", "usb", "sata", "virtualization"],
+              "bsp_layer": "oe-core",
+              "defconfig": "x86_64_defconfig",
+              "bootloader": "grub-efi"
+            }
+          }
+        }
+      },
+      "layers": {
+        "meta-intel": {
+          "description": "Intel BSP layer for x86 platforms",
+          "git_url": "https://git.yoctoproject.org/meta-intel",
+          "branch_mapping": {
+            "kirkstone": "kirkstone",
+            "scarthgap": "scarthgap",
+            "styhead": "styhead"
+          },
+          "dependencies": []
+        }
+      },
+      "vendor_tools": ["intel-ipsec-mb", "intel-qat", "openvino"],
+      "compliance": {
+        "industrial": ["IEC61508"],
+        "automotive": ["ISO26262"],
+        "security": ["FIPS-140-2"]
+      }
+    }
+  },
+  "meta_layers": {
+    "meta-openembedded": {
+      "description": "Collection of additional recipes and classes",
+      "git_url": "https://git.openembedded.org/meta-openembedded",
+      "sublayers": ["meta-oe", "meta-python", "meta-networking", "meta-multimedia", "meta-gnome", "meta-xfce"],
+      "branch_mapping": {
+        "kirkstone": "kirkstone",
+        "scarthgap": "scarthgap", 
+        "styhead": "styhead"
+      }
+    },
+    "meta-security": {
+      "description": "Security-focused recipes and configurations",
+      "git_url": "https://git.yoctoproject.org/meta-security",
+      "features": ["apparmor", "selinux", "tpm", "secure-boot", "ima-evm"]
+    },
+    "meta-virtualization": {
+      "description": "Container and virtualization support",
+      "git_url": "https://git.yoctoproject.org/meta-virtualization",
+      "features": ["docker", "podman", "kubernetes", "xen", "qemu"]
+    },
+    "meta-realtime": {
+      "description": "Real-time kernel and tools",
+      "git_url": "https://git.yoctoproject.org/meta-realtime",
+      "features": ["preempt-rt", "cyclictest", "rt-tests"]
+    }
+  },
+  "yocto_releases": {
+    "styhead": {
+      "version": "5.1",
+      "status": "development",
+      "release_date": "2025-04",
+      "lts": false,
+      "support_until": "2025-10"
+    },
+    "scarthgap": {
+      "version": "5.0",
+      "status": "stable",
+      "release_date": "2024-04",
+      "lts": true,
+      "support_until": "2026-04"
+    },
+    "nanbield": {
+      "version": "4.3",
+      "status": "stable",
+      "release_date": "2023-10",
+      "lts": false,
+      "support_until": "2024-04"
+    },
+    "mickledore": {
+      "version": "4.2",
+      "status": "stable",
+      "release_date": "2023-04",
+      "lts": false,
+      "support_until": "2024-04"
+    },
+    "langdale": {
+      "version": "4.1",
+      "status": "stable",
+      "release_date": "2022-10",
+      "lts": false,
+      "support_until": "2023-04"
+    },
+    "kirkstone": {
+      "version": "4.0",
+      "status": "stable",
+      "release_date": "2022-04",
+      "lts": true,
+      "support_until": "2024-04"
+    }
+  },
+  "license_database": {
+    "gplv3_packages": [
+      "bash", "coreutils", "findutils", "gawk", "grep", "sed", "tar",
+      "gzip", "make", "autoconf", "automake", "bison", "flex",
+      "gcc", "gdb", "binutils", "readline"
+    ],
+    "corporate_approved": {
+      "mit": ["node", "react", "vue", "angular"],
+      "bsd": ["nginx", "postgresql", "sqlite"],
+      "apache2": ["httpd", "tomcat", "kafka", "spark"],
+      "lgpl": ["gtk", "qt", "gstreamer", "alsa"]
+    },
+    "alternatives": {
+      "bash": ["dash", "busybox-sh"],
+      "coreutils": ["busybox", "toybox"],
+      "gcc": ["clang", "icc"],
+      "gdb": ["lldb"]
+    }
+  }
+}
