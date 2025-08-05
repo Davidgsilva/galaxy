@@ -72,6 +72,49 @@ class ApiClient {
     }
   }
 
+  async chatStream(requestData) {
+    try {
+      return new Promise((resolve, reject) => {
+        let fullResponse = '';
+        let fullThinking = '';
+        let usage = null;
+        let isThinking = false;
+        
+        this.streamingChat(
+          { ...requestData, streaming: true },
+          (data) => {
+            if (data.type === 'thinking') {
+              if (!isThinking) {
+                console.log('\n✻ Thinking…');
+                console.log();
+                isThinking = true;
+              }
+              process.stdout.write(chalk.gray(data.content));
+              fullThinking += data.content;
+            } else if (data.type === 'text') {
+              if (isThinking) {
+                console.log('\n');
+                isThinking = false;
+              }
+              process.stdout.write(data.content);
+              fullResponse += data.content;
+            } else if (data.type === 'end') {
+              usage = data.usage;
+            }
+          },
+          () => {
+            resolve({ response: fullResponse, thinking: fullThinking, usage });
+          },
+          (error) => {
+            reject(new Error(`Streaming chat failed: ${error.message}`));
+          }
+        );
+      });
+    } catch (error) {
+      throw new Error(`Chat stream failed: ${error.message}`);
+    }
+  }
+
   async createFile(filePath, content, prompt) {
     try {
       return await this.makeRequest('/api/files/create', {

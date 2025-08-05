@@ -100,11 +100,11 @@ const validateChatRequest = (req, res, next) => {
 
   // Max tokens validation
   if (maxTokens !== undefined) {
-    if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 8192) {
+    if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 32000) {
       return res.status(400).json({
         success: false,
         error: 'Validation Error',
-        message: 'maxTokens must be an integer between 1 and 8192'
+        message: 'maxTokens must be an integer between 1 and 32000'
       });
     }
   }

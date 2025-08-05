@@ -60,13 +60,25 @@ class AnthropicService {
         messageCount: requestData.messages?.length || 0
       });
 
-      const response = await this.client.messages.create({
+      const apiRequest = {
         model: requestData.model,
         max_tokens: requestData.max_tokens,
         temperature: requestData.temperature || 0.1,
         system: requestData.system,
         messages: requestData.messages
-      });
+      };
+
+      // Add tools if provided
+      if (requestData.tools && requestData.tools.length > 0) {
+        apiRequest.tools = requestData.tools;
+      }
+
+      // Add thinking configuration if provided
+      if (requestData.thinking) {
+        apiRequest.thinking = requestData.thinking;
+      }
+
+      const response = await this.client.messages.create(apiRequest);
 
       const duration = Date.now() - startTime;
       
@@ -117,16 +129,19 @@ class AnthropicService {
         messageCount: requestData.messages?.length || 0
       });
 
-      const stream = await this.client.messages.create({
+      const apiRequest = {
         ...requestData,
         stream: true
-      });
+      };
+
+      const stream = await this.client.messages.create(apiRequest);
 
       // Create a custom event emitter to handle streaming
       const EventEmitter = require('events');
       const streamEmitter = new EventEmitter();
 
       let fullText = '';
+      let fullThinking = '';
       let inputTokens = 0;
       let outputTokens = 0;
 
@@ -135,10 +150,23 @@ class AnthropicService {
           for await (const chunk of stream) {
             if (chunk.type === 'message_start') {
               inputTokens = chunk.message.usage?.input_tokens || 0;
+            } else if (chunk.type === 'content_block_start') {
+              // Handle different content block types
+              if (chunk.content_block?.type === 'thinking') {
+                // Thinking block started
+              } else if (chunk.content_block?.type === 'text') {
+                // Text block started
+              }
             } else if (chunk.type === 'content_block_delta') {
-              const text = chunk.delta?.text || '';
-              fullText += text;
-              streamEmitter.emit('text', text);
+              if (chunk.delta?.type === 'thinking_delta') {
+                const thinking = chunk.delta?.thinking || '';
+                fullThinking += thinking;
+                streamEmitter.emit('thinking', thinking);
+              } else if (chunk.delta?.type === 'text_delta') {
+                const text = chunk.delta?.text || '';
+                fullText += text;
+                streamEmitter.emit('text', text);
+              }
             } else if (chunk.type === 'message_delta') {
               outputTokens = chunk.usage?.output_tokens || 0;
             } else if (chunk.type === 'message_stop') {
@@ -149,11 +177,13 @@ class AnthropicService {
                 inputTokens,
                 outputTokens,
                 duration: `${duration}ms`,
-                textLength: fullText.length
+                textLength: fullText.length,
+                thinkingLength: fullThinking.length
               });
 
               streamEmitter.emit('end', {
                 fullText,
+                fullThinking,
                 usage: { input_tokens: inputTokens, output_tokens: outputTokens },
                 duration
               });

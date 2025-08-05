@@ -1,27 +1,26 @@
 # 🚀 Beacon - AI-Powered Yocto Project Assistant
 
-Beacon is an intelligent CLI tool designed specifically for embedded developers working with Yocto Project builds across different silicon platforms. It leverages Claude AI (Sonnet 4/Opus 4) to automate and streamline the complex process of setting up custom Linux distributions for embedded hardware.
+Beacon is a conversational AI CLI tool for embedded Linux developers, like "Lovable for Yocto Project". Chat with an AI expert to build custom Linux distributions, debug BitBake issues, create recipes, and manage embedded development workflows. Powered by Claude AI with deep Yocto Project expertise.
 
 ## ✨ Key Features
 
-### 🧠 **AI-Powered Intelligence**
-- **Yocto Project Expert**: Deep knowledge of BitBake, OpenEmbedded, and BSP development
-- **Hardware-Aware**: Understands silicon vendor requirements and board specifications
-- **License Compliance**: Automatic GPLv3 detection and corporate policy enforcement
-- **Security-First**: Built-in security best practices and vulnerability awareness
+### 💬 **Conversational Interface**
+- **Chat-Only CLI**: Simple interface like `claude` or `gemini` - just ask questions
+- **Natural Language**: Describe what you need in plain English
+- **Real-time Streaming**: Get responses as they're generated
+- **File Operations**: Read, write, and modify local files through conversation
 
-### 💾 **Silicon Platform Support**
-- **Tier 1**: NXP i.MX, AMD/Xilinx Zynq, Texas Instruments, Broadcom, Intel
-- **500+ Development Boards**: Comprehensive hardware specification database
-- **BSP Integration**: Automatic layer detection and compatibility checking
-- **Vendor Tools**: Integration with platform-specific development tools
+### 🧠 **Yocto Project Expertise**
+- **BitBake & OpenEmbedded**: Deep knowledge of build systems and recipes
+- **BSP Development**: Machine configurations, device trees, kernel customization
+- **License Compliance**: Automatic GPLv3 detection and corporate policy warnings
+- **Security Best Practices**: Kernel hardening, secure boot, cryptography guidance
 
-### 🔧 **Core Capabilities**
-- **Project Initialization**: AI-guided setup with silicon-specific recommendations
-- **Recipe Generation**: BitBake-compliant recipes with license compliance
-- **Build Debugging**: Intelligent error diagnosis and automated fixes
-- **Machine Configuration**: Hardware-aware BSP and device tree generation
-- **Layer Management**: Automatic dependency resolution and compatibility
+### 🔧 **Development Capabilities**
+- **Recipe Creation**: Generate BitBake recipes with proper syntax and dependencies
+- **Build Debugging**: Intelligent error diagnosis and step-by-step fixes
+- **Layer Management**: Understand dependencies and compatibility
+- **Hardware Agnostic**: Works with any embedded platform or architecture
 
 ## 🚀 Quick Start
 
@@ -35,96 +34,103 @@ cd beacon-cli
 # Install dependencies
 npm install
 
-# Initialize configuration
-npm run setup
-
-# Start proxy server
+# Start the proxy server (in one terminal)
 npm start
 
-# Use CLI (in another terminal)
-npx beacon --help
+# Use the CLI (in another terminal)
+beacon "Help me create a Qt5 recipe for ARM64"
 ```
 
 ### Basic Usage
 
 ```bash
-# Interactive project setup
-beacon init --interactive
+# Ask questions directly (like Claude CLI)
+beacon "Create a BitBake recipe for OpenCV with CUDA support"
+beacon "Help me debug this do_compile error in my kernel module"
+beacon "Set up WiFi drivers for i.MX8MP board"
+beacon "Optimize my Yocto build for faster compilation"
 
-# Quick machine-specific initialization  
-beacon init --board="imx8mp-evk" --silicon="nxp" --features="qt5,wifi,canbus"
+# Interactive chat mode
+beacon
+> How do I add CAN bus support to my embedded Linux?
+> Create a machine configuration for my custom ARM board
+> What's the best way to handle GPLv3 compliance?
+> exit
 
-# Recipe creation with AI assistance
-beacon recipe --create "opencv-cuda" --type="library"
-
-# Interactive chat with Yocto expert
-beacon chat --context --thinking
-
-# Build debugging
-beacon debug --logs --recipe="my-custom-app"
-
-# License compliance check
-beacon recipe --license-check "gstreamer-recipe"
-
-# Silicon platform information
-beacon silicon --show nxp --boards
+# Get help
+beacon help
+beacon --help
 ```
 
-## 📋 Commands Reference
+## 💬 Chat Interface
 
-### Project Management
+### Simple Conversational Commands
 ```bash
-beacon init [options]              # Initialize new Yocto project
-beacon config [options]            # Configuration management
-beacon doctor                      # System health check
-beacon analyze [options]           # Project analysis
+# Single message (like claude CLI)
+beacon "your question or request"
+
+# Interactive mode
+beacon
+
+# Show help
+beacon help
 ```
 
-### Hardware & BSP
+### Options
 ```bash
-beacon silicon [options]           # Silicon platform information
-beacon machine [options]           # Machine configuration management
-beacon layer [options]             # Layer and BSP operations
+-s, --streaming        # Enable real-time streaming (default: true)
+-t, --thinking         # Enable extended AI thinking
+-m, --model <model>    # Choose AI model (default: claude-sonnet-4)
+--temperature <temp>   # AI creativity level (0.0-1.0)
+--proxy-url <url>      # Proxy server URL
+-v, --verbose          # Show detailed information
 ```
 
-### Development
+### Example Conversations
 ```bash
-beacon recipe [options]            # Recipe generation and management
-beacon build [options]             # Build management and optimization
-beacon debug [options]             # Build debugging and troubleshooting
-```
+# Recipe Development
+beacon "Create a recipe for nginx with SSL support"
+beacon "Add systemd service integration to my recipe"
 
-### Security & Compliance
-```bash
-beacon security [options]          # Security analysis and hardening
-beacon recipe --license-check      # License compliance checking
-```
+# Build Issues
+beacon "My BitBake build fails with 'do_compile' error"
+beacon "How do I fix missing dependencies in my layer?"
 
-### Interactive Features
-```bash
-beacon chat [options]              # Interactive AI assistant
-beacon                             # Start interactive mode
+# BSP Development
+beacon "Generate device tree entries for SPI interface"
+beacon "Create machine config for custom ARM Cortex-A53 board"
+
+# License & Security
+beacon "Check my recipe for GPL compliance issues"
+beacon "Add security hardening to my kernel configuration"
 ```
 
 ## 🏗️ Architecture
 
+```
+┌─────────────┐    HTTP/JSON    ┌──────────────┐    API Calls    ┌─────────────┐
+│   Beacon    │ ──────────────> │ Proxy Server │ ──────────────> │  Anthropic  │
+│  CLI Tool   │                 │ (Node.js)    │                 │   Claude    │
+└─────────────┘                 └──────────────┘                 └─────────────┘
+```
+
 ### CLI Application (Node.js)
-- **Commander.js**: Robust command-line interface
-- **Interactive Setup**: Guided project initialization
-- **Context Awareness**: Automatic Yocto project detection
-- **Real-time Feedback**: Progress indicators and streaming responses
+- **Simple Chat Interface**: Like `claude` or `gemini` CLI tools
+- **Streaming Responses**: Real-time text output as AI generates responses
+- **File Operations**: Text editor tool for reading/writing local files
+- **Context Management**: Maintains conversation history
 
 ### Proxy Server (Node.js/Express)
-- **Anthropic API Integration**: Claude Sonnet 4 & Opus 4 models
-- **Advanced Features**: Prompt caching, extended thinking, streaming
+- **Anthropic API Integration**: Claude Sonnet 4 with text editor capabilities
+- **Yocto Expertise**: Specialized system prompts for embedded Linux
 - **Security**: Rate limiting, input validation, CORS policies
-- **Performance**: Connection pooling, request deduplication
+- **Performance**: Caching, streaming, error handling
 
-### AI Integration
-- **Specialized System Prompts**: Yocto Project expertise embedded
+### AI Capabilities
+- **Text Editor Tool**: Can create, read, update, delete local files
+- **Yocto Specialization**: Deep BitBake, OpenEmbedded, BSP knowledge
 - **License Compliance**: Automatic GPLv3 detection and warnings
-- **Security Best Practices**: Kernel security, secure boot, cryptography
-- **Hardware Intelligence**: Silicon-specific recommendations
+- **Security Best Practices**: Kernel hardening, secure boot guidance
 
 ## 🔒 Security & Compliance
 
@@ -140,115 +146,137 @@ beacon                             # Start interactive mode
 - **Input Validation**: Protection against path traversal and injection
 - **API Security**: Rate limiting, authentication, secure headers
 
-## 🌐 Silicon Platform Coverage
+## 🌐 Platform & Architecture Support
 
-### Tier 1 Support (Primary Focus)
-- **NXP i.MX Series**: i.MX6, i.MX8M Mini/Nano/Plus, i.MX8MP, i.MX9
-- **AMD/Xilinx Zynq**: UltraScale+, Versal, MPSoCs with FPGA fabric
-- **Texas Instruments**: AM335x, AM57xx, AM64x, AM62x series
-- **Broadcom**: Raspberry Pi SoCs, BCM2711, BCM2835 family
-- **Intel/Altera**: x86/x64 embedded, Cyclone V SoC, Arria 10
+### Hardware Agnostic Design
+Beacon works with **any embedded platform** - just describe your hardware in conversation:
 
-### Architecture Support
-- **ARM Cortex-A**: A53, A55, A72, A78 (32-bit and 64-bit)
-- **ARM Cortex-R**: Real-time applications
-- **ARM Cortex-M**: Microcontroller integration
-- **x86/x64**: Intel Atom, Core series for embedded
+```bash
+beacon "I have a custom ARM Cortex-A78 board with WiFi and CAN"
+beacon "Help me configure Yocto for RISC-V processor"
+beacon "Set up build for x86-64 industrial gateway"
+```
+
+### Common Platforms Beacon Knows
+- **ARM**: Cortex-A/R/M series, custom SoCs
+- **x86/x64**: Intel Atom, Core, embedded processors
 - **RISC-V**: SiFive, Andes, custom implementations
+- **Vendor SoCs**: NXP i.MX, TI AM/DM, Xilinx Zynq, Broadcom, Qualcomm
+- **Development Boards**: Raspberry Pi, BeagleBone, evaluation kits
 
-## 📊 Industry Applications
+### Industry Applications
+- **Automotive**: ADAS, infotainment, ECUs, telematics
+- **Industrial IoT**: Gateways, PLCs, HMIs, sensors
+- **Medical Devices**: Patient monitors, diagnostic equipment
+- **Consumer Electronics**: Smart home, wearables, appliances
 
-### Automotive
-- **ISO 26262 Compliance**: Functional safety requirements
-- **CAN-FD Support**: Automotive networking protocols
-- **ADAS Platforms**: Advanced driver assistance systems
-- **Infotainment**: Qt5/6 multimedia frameworks
+## 💡 What Beacon Can Help With
 
-### Industrial IoT
-- **IEC 61508 Compliance**: Industrial safety standards
-- **Fieldbus Protocols**: Modbus, PROFINET, EtherCAT
-- **Edge Computing**: Container support, OTA updates
-- **Predictive Maintenance**: ML/AI acceleration
+### Recipe Development
+- Create BitBake recipes with proper syntax and dependencies
+- Add license information and compliance checking
+- Integrate systemd services, kernel modules, applications
+- Handle complex build requirements and patches
 
-### Medical Devices
-- **FDA Compliance**: Medical device software standards
-- **Real-time Kernels**: PREEMPT_RT for critical timing
-- **Security Hardening**: HIPAA compliance features
-- **Wireless Connectivity**: Bluetooth Medical, WiFi
+### Build System Management
+- Debug BitBake errors and build failures
+- Optimize build performance and caching
+- Manage layer dependencies and compatibility
+- Configure machine and distro settings
+
+### BSP & Kernel Development
+- Create machine configurations for custom hardware
+- Generate device tree entries and modifications
+- Configure kernel features and drivers
+- Set up bootloader integration (U-Boot, GRUB)
+
+### Security & Compliance
+- Detect GPLv3 licenses and suggest alternatives
+- Implement security hardening and best practices
+- Configure secure boot and cryptographic features
+- Ensure compliance with industry standards
 
 ## 🔧 Development Workflow
 
-### 1. Project Initialization
+### 1. Start the Server
 ```bash
-# Start with interactive setup
-beacon init --interactive
-
-# Or specify requirements directly
-beacon init --board="imx8mp-evk" --silicon="nxp" --features="qt5,security,realtime"
+# Terminal 1: Start proxy server
+npm start
 ```
 
-### 2. Recipe Development
+### 2. Chat with Beacon
 ```bash
-# Create new recipe with AI assistance
-beacon recipe --create "sensor-driver" --type="kernel-module"
-
-# Analyze existing recipe for compliance
-beacon recipe --analyze "my-application" --license-check
+# Terminal 2: Ask questions naturally
+beacon "I need to create a Yocto project for automotive ECU"
+beacon "Help me set up Qt5 with CAN bus support"
+beacon "My build fails with missing dependencies"
 ```
 
-### 3. Build & Debug
+### 3. File Operations
 ```bash
-# Optimize build configuration
-beacon build --optimize --parallel=8
-
-# Debug build failures with AI
-beacon debug --error="do_compile failed" --recipe="problematic-package"
+# Beacon can read/write files through conversation
+beacon "Look at my local.conf and suggest optimizations"
+beacon "Create a BitBake recipe for my sensor driver"
+beacon "Fix the syntax errors in my machine configuration"
 ```
 
-### 4. Security & Compliance
+### 4. Interactive Development
 ```bash
-# Run security audit
-beacon security --scan --compliance=cis
-
-# Check license compliance across project
-beacon analyze --licenses --report
+# Start interactive chat session
+beacon
+> Create a recipe for OpenSSL with hardware acceleration
+> Add systemd integration to this recipe
+> Check for license compliance issues
+> Generate unit tests for my embedded application
+> exit
 ```
 
-## 🧪 Testing
+## 🧪 Development
 
 ```bash
-# Run all tests
+# Development mode (auto-restart server)
+npm run dev
+
+# Run tests
 npm test
-
-# Run Yocto-specific tests
-npm run test:yocto
 
 # Lint code
 npm run lint
 
-# Build for production
-npm run build
+# Check server health
+curl http://localhost:3001/health
 ```
 
-## 📚 Documentation
+## 🔧 Configuration
 
-- [**Getting Started Guide**](docs/getting-started.md)
-- [**API Reference**](docs/api-reference.md)
-- [**Silicon Platform Guide**](docs/silicon-platforms.md)
-- [**License Compliance**](docs/license-compliance.md)
-- [**Security Best Practices**](docs/security.md)
-- [**Troubleshooting**](docs/troubleshooting.md)
+### Environment Setup
+Create a `.env` file with your Anthropic API key:
+```bash
+ANTHROPIC_API_KEY=your-api-key-here
+```
+
+### Server Configuration
+The proxy server runs on port 3001 by default. Configure with environment variables:
+```bash
+PORT=3001                    # Server port
+ALLOWED_ORIGINS=*           # CORS origins
+NODE_ENV=development        # Environment
+```
+
+## 🚨 Limitations
+
+- **Requires Network**: Needs internet connection for AI responses
+- **API Costs**: Uses Anthropic Claude API (paid service)
+- **Local Files Only**: Text editor tool works with local filesystem
+- **No Build Execution**: Provides guidance but doesn't run BitBake builds
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Setup
 ```bash
 git clone https://github.com/beacon-yocto/beacon-cli.git
 cd beacon-cli
 npm install
-npm run dev
+npm run dev  # Start development server
 ```
 
 ## 📄 License
@@ -264,13 +292,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- **Documentation**: https://beacon-yocto.github.io/docs
-- **Issues**: https://github.com/beacon-yocto/beacon-cli/issues
-- **Discussions**: https://github.com/beacon-yocto/beacon-cli/discussions
-- **Discord**: https://discord.gg/beacon-yocto
+- **Issues**: Report bugs and feature requests
+- **Discussions**: Ask questions and share experiences
+- **Examples**: See common use cases and workflows
 
 ---
 
 **Built with ❤️ for the Embedded Linux Community**
 
-*Beacon makes Yocto Project development accessible, secure, and efficient for teams of all sizes.*
+*"Lovable for Yocto" - Chat with AI to build embedded Linux distributions faster and easier.*

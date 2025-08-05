@@ -162,6 +162,14 @@ router.post('/', validateChatRequest, async (req, res) => {
       tools = []
     } = req.body;
 
+    logger.info('Chat request received', {
+      message: message ? message.substring(0, 100) + '...' : 'empty',
+      model,
+      extendedThinking,
+      streaming,
+      toolsCount: tools.length
+    });
+
     // Check cache first if enabled
     if (useCache) {
       const cacheKey = CacheService.generateKey('chat', { message, context, model, useYoctoPrompt });
@@ -228,7 +236,7 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
     if (extendedThinking) {
       requestData.thinking = {
         type: 'enabled',
-        budget_tokens: 2048
+        budget_tokens: 8192
       };
     }
 
@@ -245,6 +253,10 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       stream.on('text', (text) => {
         fullResponse += text;
         res.write(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`);
+      });
+
+      stream.on('thinking', (thinking) => {
+        res.write(`data: ${JSON.stringify({ type: 'thinking', content: thinking })}\n\n`);
       });
 
       stream.on('end', async (data) => {
