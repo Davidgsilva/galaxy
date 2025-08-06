@@ -50,6 +50,12 @@ beacon "Help me debug this do_compile error in my kernel module"
 beacon "Set up WiFi drivers for i.MX8MP board"
 beacon "Optimize my Yocto build for faster compilation"
 
+# Interactive project setup wizard
+beacon setup
+
+# Try all available prompt types
+beacon demo-prompts
+
 # Interactive chat mode
 beacon
 > How do I add CAN bus support to my embedded Linux?
@@ -64,17 +70,50 @@ beacon --help
 
 ## 💬 Chat Interface
 
-### Simple Conversational Commands
+### Command Overview
 ```bash
 # Single message (like claude CLI)
 beacon "your question or request"
 
-# Interactive mode
+# Interactive chat mode
 beacon
+
+# Interactive project setup wizard
+beacon setup
+
+# Demonstrate all prompt types
+beacon demo-prompts
 
 # Show help
 beacon help
 ```
+
+### 🧙‍♂️ Interactive Setup Wizard
+The `beacon setup` command provides a guided experience for creating new Yocto projects:
+
+```bash
+beacon setup
+```
+
+Features:
+- **Machine Selection**: Choose from supported hardware platforms (i.MX8, Zynq, TI AM, etc.)
+- **Distribution Setup**: Select Poky, Poky-Tiny, or Nodistro
+- **Release Selection**: Pick LTS releases (Kirkstone, Scarthgap) or latest (Styhead)
+- **Build Options**: Multi-select features like debug symbols, security hardening, WiFi/Bluetooth
+- **Shared State**: Configure sstate directory for faster builds
+- **AI Integration**: Get personalized setup guidance based on your selections
+
+### 🎨 Prompt Capabilities
+Beacon uses modern interactive prompts for enhanced user experience:
+
+- **Text Input**: Smart validation and suggestions
+- **Single Select**: Choose from predefined options
+- **Multi-Select**: Pick multiple build features or tools
+- **Confirm**: Yes/no decisions with smart defaults
+- **Number Input**: Numeric values with min/max validation
+- **Editor**: Launch your preferred editor for complex configurations
+- **Expandable**: Single-letter shortcuts for quick actions
+- **Search**: Find options quickly in large lists
 
 ### Options
 ```bash
@@ -110,27 +149,36 @@ beacon "Add security hardening to my kernel configuration"
 ```
 ┌─────────────┐    HTTP/JSON    ┌──────────────┐    API Calls    ┌─────────────┐
 │   Beacon    │ ──────────────> │ Proxy Server │ ──────────────> │  Anthropic  │
-│  CLI Tool   │                 │ (Node.js)    │                 │   Claude    │
-└─────────────┘                 └──────────────┘                 └─────────────┘
+│  CLI Tool   │                 │ (Usage Track) │                 │   Claude    │
+│             │                 │              │                 │             │
+│ Local Files │ ◄──────────────┐ │              │                 │             │
+│ Operations  │                │ │              │                 │             │
+└─────────────┘                │ └──────────────┘                 └─────────────┘
+       │                       │
+       ▼                       │
+┌─────────────┐                │
+│ Local File  │                │
+│ System      │ ───────────────┘
+└─────────────┘
 ```
 
 ### CLI Application (Node.js)
-- **Simple Chat Interface**: Like `claude` or `gemini` CLI tools
-- **Streaming Responses**: Real-time text output as AI generates responses
-- **File Operations**: Text editor tool for reading/writing local files
-- **Context Management**: Maintains conversation history
+- **Local File Operations**: Direct filesystem access for Yocto project creation
+- **AI Integration**: Chat interface for guidance and code generation
+- **Streaming Responses**: Real-time AI responses with thinking visualization
+- **Session Tracking**: Unique session IDs for usage monitoring
 
 ### Proxy Server (Node.js/Express)
-- **Anthropic API Integration**: Claude Sonnet 4 with text editor capabilities
-- **Yocto Expertise**: Specialized system prompts for embedded Linux
-- **Security**: Rate limiting, input validation, CORS policies
-- **Performance**: Caching, streaming, error handling
+- **Usage Tracking**: Monitor Claude API usage and costs
+- **Claude API Proxy**: Secure relay to Anthropic services
+- **No File Access**: Server only handles AI requests, not files
+- **Security**: Rate limiting, session tracking, CORS policies
 
-### AI Capabilities
-- **Text Editor Tool**: Can create, read, update, delete local files
-- **Yocto Specialization**: Deep BitBake, OpenEmbedded, BSP knowledge
-- **License Compliance**: Automatic GPLv3 detection and warnings
-- **Security Best Practices**: Kernel hardening, secure boot guidance
+### Local File Service
+- **Direct Filesystem**: All file operations happen locally on client
+- **Security**: Built-in path validation and safety checks
+- **Performance**: No network overhead for file operations
+- **Privacy**: Files never leave the local machine
 
 ## 🔒 Security & Compliance
 
@@ -210,6 +258,9 @@ npm start
 beacon "I need to create a Yocto project for automotive ECU"
 beacon "Help me set up Qt5 with CAN bus support"
 beacon "My build fails with missing dependencies"
+
+# Or use the interactive setup wizard
+beacon setup
 ```
 
 ### 3. File Operations
@@ -229,7 +280,55 @@ beacon
 > Check for license compliance issues
 > Generate unit tests for my embedded application
 > exit
+
+# Quick project setup with guided wizard
+beacon setup
+# Follows interactive prompts for:
+# - Project name
+# - Target machine (i.MX8, Zynq, etc.)
+# - Yocto distribution and release
+# - Build options and features
+# - AI assistance for next steps
 ```
+
+## 🎯 Advanced Features
+
+### Interactive Prompt System
+Beacon includes a comprehensive prompt system for enhanced user interactions:
+
+```bash
+# Try all prompt types
+beacon demo-prompts
+```
+
+**Available Prompt Types:**
+- **Input**: Text entry with validation and suggestions
+- **Select**: Single choice from a list of options  
+- **Checkbox**: Multiple selections with toggles
+- **Confirm**: Yes/no prompts with smart defaults
+- **Search**: Searchable option lists for large datasets
+- **Password**: Secure input for sensitive information
+- **Expand**: Quick actions with single-letter shortcuts
+- **Editor**: Launch external editor for complex content
+- **Number**: Numeric input with min/max validation
+- **Raw List**: Numbered list selection
+
+**Yocto-Specific Prompts:**
+- Machine selection from supported hardware platforms
+- Distribution and release picking with LTS indicators
+- Multi-select build options and features
+- License compliance confirmation flows
+- Build path and configuration validation
+
+### Project Setup Wizard
+The interactive setup wizard combines multiple prompt types for streamlined project creation:
+
+1. **Project Configuration**: Name, description, target platform
+2. **Hardware Selection**: From extensive supported machine list
+3. **Software Stack**: Distribution, release, package selections
+4. **Build Options**: Multi-select features, optimizations, security settings
+5. **Directory Setup**: Shared state, download cache, build paths
+6. **AI Integration**: Contextual assistance based on selections
 
 ## 🧪 Development
 
@@ -242,6 +341,12 @@ npm test
 
 # Lint code
 npm run lint
+
+# Test prompt functionality
+beacon demo-prompts
+
+# Test interactive setup
+beacon setup
 
 # Check server health
 curl http://localhost:3001/health

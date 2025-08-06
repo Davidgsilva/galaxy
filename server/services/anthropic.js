@@ -144,18 +144,29 @@ class AnthropicService {
       let fullThinking = '';
       let inputTokens = 0;
       let outputTokens = 0;
+      let toolUses = [];
+      let currentMessage = null;
 
       (async () => {
         try {
           for await (const chunk of stream) {
             if (chunk.type === 'message_start') {
               inputTokens = chunk.message.usage?.input_tokens || 0;
+              currentMessage = chunk.message;
             } else if (chunk.type === 'content_block_start') {
               // Handle different content block types
               if (chunk.content_block?.type === 'thinking') {
                 // Thinking block started
               } else if (chunk.content_block?.type === 'text') {
                 // Text block started
+              } else if (chunk.content_block?.type === 'tool_use') {
+                // Tool use block started - store it
+                toolUses.push({
+                  id: chunk.content_block.id,
+                  name: chunk.content_block.name,
+                  input: chunk.content_block.input
+                });
+                streamEmitter.emit('tool_use', chunk.content_block);
               }
             } else if (chunk.type === 'content_block_delta') {
               if (chunk.delta?.type === 'thinking_delta') {

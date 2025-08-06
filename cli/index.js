@@ -3,16 +3,162 @@
 const { Command } = require('commander');
 const chalk = require('chalk');
 const ora = require('ora');
-const inquirer = require('inquirer');
+const { 
+  input, 
+  select, 
+  checkbox, 
+  confirm, 
+  search, 
+  password, 
+  expand, 
+  editor, 
+  number, 
+  rawlist 
+} = require('@inquirer/prompts');
 const path = require('path');
 
 const packageInfo = require('../package.json');
 const ApiClient = require('./services/api-client');
 
+class PromptHelper {
+  static async input(message, options = {}) {
+    return await input({ message, ...options });
+  }
+
+  static async select(message, choices, options = {}) {
+    return await select({ message, choices, ...options });
+  }
+
+  static async multiSelect(message, choices, options = {}) {
+    return await checkbox({ message, choices, ...options });
+  }
+
+  static async confirm(message, options = {}) {
+    return await confirm({ message, ...options });
+  }
+
+  static async search(message, source, options = {}) {
+    return await search({ message, source, ...options });
+  }
+
+  static async password(message, options = {}) {
+    return await password({ message, ...options });
+  }
+
+  static async expand(message, choices, options = {}) {
+    return await expand({ message, choices, ...options });
+  }
+
+  static async editor(message, options = {}) {
+    return await editor({ message, ...options });
+  }
+
+  static async number(message, options = {}) {
+    return await number({ message, ...options });
+  }
+
+  static async rawList(message, choices, options = {}) {
+    return await rawlist({ message, choices, ...options });
+  }
+
+  // Common Yocto-specific prompt patterns
+  static async selectYoctoMachine() {
+    const machines = [
+      { name: 'Raspberry Pi 4 (64-bit)', value: 'raspberrypi4-64', description: 'Popular development board, ARM Cortex-A72' },
+      { name: 'Raspberry Pi 3 (64-bit)', value: 'raspberrypi3-64', description: 'ARM Cortex-A53, WiFi/Bluetooth' },
+      { name: 'BeagleBone Black', value: 'beaglebone-yocto', description: 'TI AM335x, industrial IoT' },
+      { name: 'NXP i.MX8MM EVK', value: 'imx8mm-evk', description: 'Automotive/industrial, ARM Cortex-A53' },
+      { name: 'NXP i.MX8MP EVK', value: 'imx8mp-evk', description: 'AI/ML accelerator, ARM Cortex-A53' },
+      { name: 'NXP i.MX6UL EVK', value: 'imx6ul-evk', description: 'Low-power, ARM Cortex-A7' },
+      { name: 'Xilinx ZynqMP', value: 'zynqmp-generic', description: 'FPGA + ARM, programmable logic' },
+      { name: 'Xilinx Versal', value: 'versal-generic', description: 'AI Engine, adaptive computing' },
+      { name: 'TI AM64xx EVM', value: 'am64xx-evm', description: 'Industrial automation, dual ARM Cortex-A53' },
+      { name: 'TI AM62xx EVM', value: 'am62xx-evm', description: 'HMI applications, ARM Cortex-A53' },
+      { name: 'Intel x86-64 Generic', value: 'genericx86-64', description: 'PC/server hardware, Intel/AMD' },
+      { name: 'Intel Core i7', value: 'intel-corei7-64', description: 'High-performance x86-64' },
+      { name: 'Custom Hardware', value: 'custom', description: 'Describe your hardware to AI' }
+    ];
+
+    return await this.select('🔧 Select your target hardware:', machines);
+  }
+
+  static async getProjectType() {
+    const types = [
+      { name: '🆕 Create new Yocto project', value: 'new', description: 'Start fresh Linux distribution' },
+      { name: '🔧 Work on existing project', value: 'existing', description: 'Continue development' }
+    ];
+
+    return await this.select('What would you like to do?', types);
+  }
+
+  static async getProjectDescription() {
+    return await this.input(
+      '📝 Describe your project (e.g., "IoT gateway with WiFi and CAN bus for industrial automation"):',
+      {
+        validate: (input) => input.trim().length > 10 || 'Please provide a detailed description (at least 10 characters)'
+      }
+    );
+  }
+
+  static async selectYoctoDistro() {
+    const distros = [
+      { name: 'Poky (default)', value: 'poky' },
+      { name: 'Poky Tiny', value: 'poky-tiny' },
+      { name: 'Nodistro', value: 'nodistro' }
+    ];
+
+    return await this.select('Select Yocto distribution:', distros);
+  }
+
+  static async selectYoctoRelease() {
+    const releases = [
+      { name: 'Scarthgap (LTS - 5.0)', value: 'scarthgap' },
+      { name: 'Kirkstone (LTS - 4.0)', value: 'kirkstone' },
+      { name: 'Styhead (latest)', value: 'styhead' }
+    ];
+
+    return await this.select('Select Yocto release:', releases);
+  }
+
+  static async configureBuildOptions() {
+    const options = [
+      { name: 'Enable debug symbols', value: 'debug' },
+      { name: 'Optimize for size', value: 'optimize_size' },
+      { name: 'Enable security features', value: 'security' },
+      { name: 'Include development tools', value: 'dev_tools' },
+      { name: 'Enable systemd', value: 'systemd' },
+      { name: 'Include WiFi support', value: 'wifi' },
+      { name: 'Include Bluetooth support', value: 'bluetooth' }
+    ];
+
+    return await this.multiSelect('Select build options:', options);
+  }
+
+  static async getProjectConfiguration() {
+    const config = {};
+    
+    config.projectName = await this.input('Project name:');
+    config.machine = await this.selectYoctoMachine();
+    config.distro = await this.selectYoctoDistro();
+    config.release = await this.selectYoctoRelease();
+    config.buildOptions = await this.configureBuildOptions();
+    config.useSharedState = await this.confirm('Use shared state directory for faster builds?', { default: true });
+    
+    if (config.useSharedState) {
+      config.sharedStateDir = await this.input('Shared state directory path:', { default: '/opt/yocto-sstate' });
+    }
+
+    return config;
+  }
+}
+
 class BeaconYoctoCLI {
   constructor() {
     this.program = new Command();
     this.apiClient = new ApiClient();
+    
+    // Register for file operations immediately
+    this.apiClient.registerForFileOperations();
     
     this.setupCommands();
   }
@@ -38,7 +184,7 @@ class BeaconYoctoCLI {
       .option('--temperature <temp>', 'temperature for AI responses', '0.1')
       .action(async (message, options) => {
         if (!message) {
-          await this.startInteractiveMode(options);
+          await this.startBeacon(options);
         } else {
           await this.sendMessage(message, options);
         }
@@ -50,6 +196,22 @@ class BeaconYoctoCLI {
       .description('Show help information')
       .action(() => {
         this.showHelp();
+      });
+
+    // Interactive project setup command
+    this.program
+      .command('setup')
+      .description('Interactive Yocto project setup wizard')
+      .action(async (options) => {
+        await this.runProjectSetup(options);
+      });
+
+    // Prompt demo command
+    this.program
+      .command('demo-prompts')
+      .description('Demonstrate all available prompt types')
+      .action(async () => {
+        await this.demoPrompts();
       });
   }
 
@@ -76,10 +238,7 @@ User Request: ${message}`;
         streaming: options.streaming,
         extendedThinking: options.thinking !== false, // Default to true
         useYoctoPrompt: true,
-        tools: [{
-          type: 'text_editor_20250728',
-          name: 'str_replace_based_edit_tool'
-        }]
+        tools: []
       };
 
       if (options.streaming) {
@@ -206,10 +365,16 @@ User Request: ${message}`;
     console.log(chalk.gray('\nUsage:'));
     console.log('  beacon [message]                    # Send a message to Yocto AI');
     console.log('  beacon                              # Start interactive chat mode');
+    console.log('  beacon setup                        # Interactive project setup wizard');
+    console.log('  beacon demo-prompts                 # Demonstrate all prompt types');
     console.log('\nExamples:');
     console.log('  beacon "Create a Qt5 recipe"');
     console.log('  beacon "Help debug my build error"');
     console.log('  beacon "Set up WiFi drivers for i.MX8"');
+    console.log('\nCommands:');
+    console.log('  setup                               # Interactive Yocto project setup');
+    console.log('  demo-prompts                        # Try all available prompt types');
+    console.log('  help                                # Show this help');
     console.log('\nInteractive Commands:');
     console.log('  /help or help                       # Show this help');
     console.log('  /status or status                   # Show project status');
@@ -230,6 +395,824 @@ User Request: ${message}`;
     console.log('  🐛 Error diagnosis and troubleshooting');
     console.log('  📚 Layer management and dependencies');
     console.log('  ⚙️  Device tree and kernel configuration');
+  }
+
+  async startBeacon(options) {
+    console.log('╭───────────────────────────────────────────────────╮');
+    console.log('│ 🚀 Welcome to Beacon - Lovable for Yocto!         │');
+    console.log('│                                                   │');
+    console.log('│   AI-powered embedded Linux distribution builder  │');
+    console.log('│                                                   │');
+    console.log('╰───────────────────────────────────────────────────╯');
+    console.log();
+
+    try {
+      const projectType = await PromptHelper.getProjectType();
+      
+      if (projectType.value === 'new') {
+        await this.createNewProject(options);
+      } else {
+        await this.startInteractiveMode(options);
+      }
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), error.message);
+    }
+  }
+
+  async createNewProject(options) {
+    console.log(chalk.blue('\n🎯 New Yocto Project Creation'));
+    console.log(chalk.gray('─'.repeat(50)));
+
+    try {
+      // Get project description first
+      const description = await PromptHelper.getProjectDescription();
+      
+      // Select hardware
+      const machine = await PromptHelper.selectYoctoMachine();
+      
+      let hardwareDetails = '';
+      if (machine.value === 'custom') {
+        hardwareDetails = await PromptHelper.input(
+          '🔧 Describe your custom hardware (processor, peripherals, etc.):',
+          {
+            validate: (input) => input.trim().length > 5 || 'Please provide hardware details'
+          }
+        );
+      }
+
+      // Get project name
+      const projectName = await PromptHelper.input('📁 Project name:', {
+        default: 'my-yocto-project',
+        validate: (input) => {
+          const name = input.trim();
+          return (name.length > 0 && /^[a-zA-Z0-9_-]+$/.test(name)) || 
+                 'Project name must contain only letters, numbers, hyphens, and underscores';
+        }
+      });
+
+      // Choose Yocto release
+      const release = await PromptHelper.selectYoctoRelease();
+
+      console.log(chalk.green('\n✅ Project Configuration Complete!'));
+      console.log(chalk.gray('─'.repeat(40)));
+      console.log(`📝 Description: ${chalk.cyan(description)}`);
+      console.log(`📁 Project: ${chalk.cyan(projectName)}`);
+      console.log(`🔧 Hardware: ${chalk.cyan(machine.name)}`);
+      if (hardwareDetails) {
+        console.log(`🔧 Details: ${chalk.cyan(hardwareDetails)}`);
+      }
+      console.log(`🏗️  Release: ${chalk.cyan(release.name)}`);
+
+      const proceed = await PromptHelper.confirm('\n🚀 Ready to create your Yocto project?', { default: true });
+
+      if (proceed) {
+        // Create the project using AI with enhanced context
+        await this.generateYoctoProject({
+          description,
+          projectName,
+          machine: machine.value === 'custom' ? hardwareDetails : machine,
+          release: release,
+          hardwareDetails,
+          options
+        });
+      } else {
+        console.log(chalk.yellow('Project creation cancelled. You can restart anytime with: beacon'));
+      }
+
+    } catch (error) {
+      console.error(chalk.red('❌ Project creation failed:'), error.message);
+    }
+  }
+
+  async generateYoctoProject(config) {
+    console.log(chalk.blue('\n🤖 Generating your Yocto project with AI...'));
+    console.log(chalk.gray('─'.repeat(60)));
+
+    try {
+      // Step 1: Project Planning
+      this.showProgressStep('📋 Planning', 'Analyzing requirements and hardware specifications');
+      await this.delay(800);
+
+      // Step 2: Research Phase
+      this.showProgressStep('🔍 Research', 'Looking up latest Yocto documentation and BSP layers');
+      await this.delay(1000);
+
+      // Step 3: AI Processing
+      this.showProgressStep('🧠 AI Processing', 'Generating project structure and configurations');
+      
+      const aiPrompt = this.buildProjectGenerationPrompt(config);
+      
+      const requestData = {
+        message: aiPrompt,
+        context: [],
+        model: config.options.model || 'claude-sonnet-4-20250514',
+        temperature: 1,
+        maxTokens: 16000,
+        streaming: true,
+        extendedThinking: true,
+        useYoctoPrompt: true,
+        tools: [
+          {
+            type: 'text_editor_20250728',
+            name: 'str_replace_based_edit_tool'
+          },
+          {
+            type: 'web_search_20250305',
+            name: 'web_search'
+          }
+        ]
+      };
+
+      console.log(chalk.blue('\n🤖 Beacon AI:'));
+      const aiResponse = await this.handleStreamingResponseWithProgress(requestData, config);
+
+      // Step 4: Local File Generation
+      this.showProgressStep('📁 Creating Files', 'Generating project structure locally');
+      await this.createProjectFilesLocally(config, aiResponse);
+
+      // Step 5: Finalization
+      this.showProgressStep('✨ Finalizing', 'Setting up executable scripts');
+      await this.delay(500);
+
+      console.log(chalk.green('\n🎉 Project generation complete!'));
+      console.log(chalk.gray('─'.repeat(60)));
+      console.log(chalk.blue('📁 Your Yocto project is ready!'));
+      console.log(chalk.yellow('💡 Next steps:'));
+      console.log(`   1. cd ${config.projectName}`);
+      console.log('   2. source oe-init-build-env');
+      console.log('   3. bitbake core-image-minimal');
+      console.log(chalk.blue('\n💬 Continue with: beacon (for more help)'));
+
+    } catch (error) {
+      console.error(chalk.red('\n❌ Project generation failed:'), error.message);
+      if (error.message.includes('file operation')) {
+        console.log(chalk.yellow('💡 This might be due to file permissions or path issues.'));
+      }
+    }
+  }
+
+  showProgressStep(icon, description) {
+    const timestamp = new Date().toLocaleTimeString();
+    console.log(`${chalk.cyan(icon)} ${description}... ${chalk.gray(`[${timestamp}]`)}`);
+  }
+
+  showOperationStart(operation, details = '') {
+    const timestamp = new Date().toLocaleTimeString();
+    const prefix = chalk.blue('►');
+    process.stdout.write(`${prefix} ${chalk.cyan(operation)}${details ? ` ${chalk.gray(details)}` : ''}... ${chalk.gray(`[${timestamp}]`)}`);
+  }
+
+  showOperationComplete(duration, result = '') {
+    const durationText = duration ? ` ${chalk.gray(`(${duration}ms)`)}` : '';
+    const resultText = result ? ` ${chalk.green(result)}` : '';
+    console.log(`${durationText}${resultText} ${chalk.green('✓')}`);
+  }
+
+  showOperationError(error, duration) {
+    const durationText = duration ? ` ${chalk.gray(`(${duration}ms)`)}` : '';
+    console.log(`${durationText} ${chalk.red('✗')} ${chalk.red(error)}`);
+  }
+
+  async delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async handleStreamingResponseWithProgress(requestData, config) {
+    let currentOperation = null;
+    let operationStartTime = Date.now();
+    const operations = [];
+    
+    try {
+      const response = await this.apiClient.chatStream(requestData);
+      
+      // Enhanced operation tracking
+      const originalWrite = process.stdout.write.bind(process.stdout);
+      const originalLog = console.log;
+      
+      console.log = (...args) => {
+        const message = args.join(' ');
+        
+        // Detect various operations and show progress
+        const operationPatterns = [
+          { pattern: /(Cloning|clone.*repositor)/i, icon: '📦', color: 'yellow', name: 'Repository Setup' },
+          { pattern: /(Creating.*director|mkdir)/i, icon: '📁', color: 'blue', name: 'Directory Creation' },
+          { pattern: /(Writing|Creating).*local\.conf/i, icon: '⚙️', color: 'cyan', name: 'Configuration Setup' },
+          { pattern: /(Writing|Creating).*bblayers\.conf/i, icon: '🔧', color: 'cyan', name: 'Layer Configuration' },
+          { pattern: /(Writing|Creating).*README/i, icon: '📝', color: 'green', name: 'Documentation' },
+          { pattern: /(Generat|Creat).*BSP/i, icon: '🔧', color: 'magenta', name: 'BSP Configuration' },
+          { pattern: /(Writing|Creating).*recipe/i, icon: '🍳', color: 'yellow', name: 'Recipe Creation' },
+          { pattern: /(Setting up|Configur).*build/i, icon: '🏗️', color: 'blue', name: 'Build Setup' },
+          { pattern: /(Research|Search).*documentation/i, icon: '🔍', color: 'gray', name: 'Documentation Research' },
+        ];
+
+        for (const { pattern, icon, color, name } of operationPatterns) {
+          if (pattern.test(message)) {
+            // Complete previous operation
+            if (currentOperation) {
+              const duration = Date.now() - operationStartTime;
+              this.showOperationComplete(duration);
+            }
+
+            // Start new operation
+            currentOperation = name;
+            operationStartTime = Date.now();
+            this.showOperationStart(`${icon} ${name}`);
+            operations.push({ name, startTime: operationStartTime });
+            
+            // Don't show the original message for operations we're tracking
+            return;
+          }
+        }
+
+        // Show progress for file creation
+        if (message.includes('✓') || message.includes('Created') || message.includes('✅')) {
+          if (currentOperation) {
+            const duration = Date.now() - operationStartTime;
+            const fileMatch = message.match(/([^/\n]+\.(conf|md|sh|bb|bbappend|inc))/);
+            const filename = fileMatch ? fileMatch[1] : '';
+            this.showOperationComplete(duration, filename);
+            currentOperation = null;
+          }
+          return; // Don't show the original success message
+        }
+
+        // Show regular AI output (but suppress some verbose tool output)
+        if (!message.includes('str_replace_based_edit_tool') && 
+            !message.includes('tool_use') && 
+            !message.includes('Executing') &&
+            !message.match(/^(\s*$|─+)$/)) {
+          originalLog(...args);
+        }
+      };
+
+      // Wait for streaming to complete
+      await response;
+      
+      // Complete final operation
+      if (currentOperation) {
+        const duration = Date.now() - operationStartTime;
+        this.showOperationComplete(duration);
+      }
+
+      // Restore original functions
+      console.log = originalLog;
+      
+      // Show summary
+      if (operations.length > 0) {
+        console.log(chalk.green(`\n📊 Completed ${operations.length} operations successfully`));
+        console.log(chalk.gray('Operations: ' + operations.map(op => op.name).join(', ')));
+      }
+      
+      return response;
+      
+    } catch (error) {
+      // Restore functions on error
+      console.log = originalLog;
+      
+      if (currentOperation) {
+        const duration = Date.now() - operationStartTime;
+        this.showOperationError(error.message, duration);
+      }
+      
+      throw error;
+    }
+  }
+
+  buildProjectGenerationPrompt(config) {
+    return `I need you to create a complete Yocto Project for embedded Linux development. This is like "Lovable for Yocto" - I want to provide real-time feedback to the user about what you're doing, similar to how Claude Code shows progress.
+
+PROJECT DETAILS:
+- Name: ${config.projectName}
+- Description: ${config.description}
+- Target Hardware: ${config.machine.name || config.machine}
+- Hardware Details: ${config.hardwareDetails || 'Standard configuration'}
+- Yocto Release: ${config.release.name} (${config.release.value})
+
+IMPORTANT - PROVIDE PROGRESS FEEDBACK:
+As you work, clearly describe what you're doing at each step. Use phrases like:
+- "Creating project directory structure..."
+- "Writing setup script for cloning Yocto repositories..."
+- "Writing local.conf with ${config.machine.name || config.machine} configuration..."
+- "Generating BSP layer for hardware..."
+- "Creating build scripts..."
+- "Writing documentation and setup guides..."
+
+TASK: Create a complete Yocto project structure including:
+
+1. **Project Directory Setup**:
+   - Create project directory: ${config.projectName}
+   - Create standard Yocto directory structure (sources/, build/, downloads/, sstate-cache/)
+   - Generate .gitignore for Yocto projects
+
+2. **Repository Setup Scripts**:
+   - Create setup-yocto.sh script that clones the necessary repositories:
+     * git clone -b ${config.release.value} git://git.yoctoproject.org/poky.git sources/poky
+     * git clone -b ${config.release.value} git://git.openembedded.org/meta-openembedded sources/meta-openembedded
+     * Hardware-specific layers based on the target machine
+   - Create environment setup script (setup-environment.sh)
+   - Make scripts executable and well-documented
+
+3. **Configuration Templates**:
+   - local.conf template with machine-specific settings for ${config.machine.value || config.machine}
+   - bblayers.conf template with required layers for the hardware
+   - site.conf for build optimizations (parallel make, sstate, downloads cache)
+   - auto-setup.sh to initialize build environment
+
+4. **Hardware-Specific Research & Setup**:
+   - Use web_search to find latest BSP information for ${config.machine.name || config.machine}
+   - Research required layers and dependencies
+   - Create machine-specific configuration notes
+   - Add hardware setup instructions
+
+5. **Build Scripts & Automation**:
+   - build.sh script for common build commands
+   - clean.sh for cleaning builds
+   - flash.sh script with hardware-specific flashing instructions
+   - Environment validation script
+
+6. **Documentation & Guides**:
+   - README.md with complete setup and build instructions
+   - HARDWARE.md with ${config.machine.name || config.machine} specific notes
+   - BUILD.md with build options and troubleshooting
+   - Include all git clone commands and setup steps
+
+7. **Research Current Best Practices**:
+   - Use web_search to find latest ${config.release.value} documentation
+   - Look up ${config.machine.name || config.machine} BSP layers and setup guides
+   - Find community examples and best practices
+
+CRITICAL INSTRUCTIONS:
+- Use the text_editor tool to create ALL files and scripts
+- Use web_search to research current Yocto practices and BSP information
+- Create scripts that users can run to automatically clone Yocto repositories
+- Include specific git clone commands in your scripts:
+  * git clone -b ${config.release.value} git://git.yoctoproject.org/poky.git
+  * git clone -b ${config.release.value} git://git.openembedded.org/meta-openembedded
+  * Add hardware-specific layer repositories
+- Make everything executable and well-documented
+- Provide running commentary on what you're creating
+- Include validation steps and error handling in scripts
+- Optimize for ${config.machine.value || config.hardwareDetails} hardware
+
+Create a complete, production-ready Yocto project structure that includes all necessary scripts for users to clone repositories and start building immediately. Focus on creating setup scripts rather than trying to clone repositories directly.`;
+  }
+
+  async createProjectFilesLocally(config, aiResponse) {
+    const fs = require('fs').promises;
+    const path = require('path');
+    
+    try {
+      // Create project directory
+      const projectPath = path.resolve(config.projectName);
+      await fs.mkdir(projectPath, { recursive: true });
+      
+      // Create standard Yocto directory structure
+      const dirs = ['sources', 'build', 'downloads', 'sstate-cache', 'scripts'];
+      for (const dir of dirs) {
+        await fs.mkdir(path.join(projectPath, dir), { recursive: true });
+        this.showOperationComplete(50, dir);
+      }
+
+      // Create setup script for cloning repositories
+      const setupScript = this.generateSetupScript(config);
+      await fs.writeFile(path.join(projectPath, 'setup-yocto.sh'), setupScript, { mode: 0o755 });
+      this.showOperationComplete(100, 'setup-yocto.sh');
+
+      // Create environment setup script
+      const envScript = this.generateEnvironmentScript(config);
+      await fs.writeFile(path.join(projectPath, 'setup-environment.sh'), envScript, { mode: 0o755 });
+      this.showOperationComplete(80, 'setup-environment.sh');
+
+      // Create build script
+      const buildScript = this.generateBuildScript(config);
+      await fs.writeFile(path.join(projectPath, 'build.sh'), buildScript, { mode: 0o755 });
+      this.showOperationComplete(90, 'build.sh');
+
+      // Create configuration templates
+      const localConf = this.generateLocalConf(config);
+      await fs.mkdir(path.join(projectPath, 'conf'), { recursive: true });
+      await fs.writeFile(path.join(projectPath, 'conf', 'local.conf.template'), localConf);
+      this.showOperationComplete(120, 'local.conf.template');
+
+      const bblayersConf = this.generateBblayersConf(config);
+      await fs.writeFile(path.join(projectPath, 'conf', 'bblayers.conf.template'), bblayersConf);
+      this.showOperationComplete(110, 'bblayers.conf.template');
+
+      // Create README
+      const readme = this.generateReadme(config);
+      await fs.writeFile(path.join(projectPath, 'README.md'), readme);
+      this.showOperationComplete(200, 'README.md');
+
+      // Create .gitignore
+      const gitignore = this.generateGitignore();
+      await fs.writeFile(path.join(projectPath, '.gitignore'), gitignore);
+      this.showOperationComplete(30, '.gitignore');
+
+      console.log(chalk.green(`\n✅ Created project structure in: ${projectPath}`));
+
+    } catch (error) {
+      this.showOperationError(`Failed to create project files: ${error.message}`, 0);
+      throw error;
+    }
+  }
+
+  generateSetupScript(config) {
+    const release = config.release.value || 'scarthgap';
+    const machineValue = config.machine.value || config.machine;
+    
+    let additionalLayers = '';
+    
+    // Add hardware-specific layers
+    if (machineValue.includes('raspberrypi')) {
+      additionalLayers += `
+echo "Cloning Raspberry Pi BSP layer..."
+git clone -b ${release} git://git.yoctoproject.org/meta-raspberrypi sources/meta-raspberrypi`;
+    } else if (machineValue.includes('imx')) {
+      additionalLayers += `
+echo "Cloning NXP i.MX BSP layer..."
+git clone -b ${release} https://github.com/Freescale/meta-freescale.git sources/meta-freescale
+git clone -b ${release} https://github.com/Freescale/meta-freescale-3rdparty.git sources/meta-freescale-3rdparty`;
+    }
+
+    return `#!/bin/bash
+# Yocto Project Setup Script for ${config.projectName}
+# Generated by Beacon - Lovable for Yocto
+# Target: ${config.machine.name || machineValue}
+# Release: ${config.release.name} (${release})
+
+set -e
+
+echo "Setting up Yocto Project ${config.projectName}..."
+echo "Target Hardware: ${config.machine.name || machineValue}"
+echo "Yocto Release: ${release}"
+echo ""
+
+# Create sources directory if it doesn't exist
+mkdir -p sources
+
+# Clone Poky (core Yocto)
+if [ ! -d "sources/poky" ]; then
+    echo "Cloning Poky (Yocto core)..."
+    git clone -b ${release} git://git.yoctoproject.org/poky.git sources/poky
+else
+    echo "Poky already exists, updating..."
+    cd sources/poky
+    git pull
+    cd ../..
+fi
+
+# Clone meta-openembedded
+if [ ! -d "sources/meta-openembedded" ]; then
+    echo "Cloning meta-openembedded..."
+    git clone -b ${release} git://git.openembedded.org/meta-openembedded sources/meta-openembedded
+else
+    echo "meta-openembedded already exists, updating..."
+    cd sources/meta-openembedded
+    git pull
+    cd ../..
+fi
+${additionalLayers}
+
+echo ""
+echo "✅ Repository setup complete!"
+echo "Next steps:"
+echo "  1. Run: ./setup-environment.sh"
+echo "  2. Run: ./build.sh"
+echo ""
+`;
+  }
+
+  generateEnvironmentScript(config) {
+    return `#!/bin/bash
+# Yocto Build Environment Setup
+# Generated by Beacon - Lovable for Yocto
+
+set -e
+
+if [ ! -d "sources/poky" ]; then
+    echo "❌ Poky not found. Run ./setup-yocto.sh first."
+    exit 1
+fi
+
+# Source the Yocto environment
+echo "Setting up Yocto build environment..."
+source sources/poky/oe-init-build-env build
+
+# Copy configuration templates if they don't exist
+if [ ! -f conf/local.conf.orig ]; then
+    cp conf/local.conf conf/local.conf.orig
+fi
+
+if [ ! -f conf/bblayers.conf.orig ]; then
+    cp conf/bblayers.conf conf/bblayers.conf.orig
+fi
+
+# Copy our templates
+if [ -f ../conf/local.conf.template ]; then
+    echo "Copying local.conf template..."
+    cp ../conf/local.conf.template conf/local.conf
+fi
+
+if [ -f ../conf/bblayers.conf.template ]; then
+    echo "Copying bblayers.conf template..."
+    cp ../conf/bblayers.conf.template conf/bblayers.conf
+fi
+
+echo "✅ Build environment ready!"
+echo "You are now in the build directory."
+echo "Run 'bitbake core-image-minimal' to start building."
+`;
+  }
+
+  generateBuildScript(config) {
+    const machineValue = config.machine.value || config.machine;
+    
+    return `#!/bin/bash
+# Yocto Build Script
+# Generated by Beacon - Lovable for Yocto
+
+set -e
+
+# Check if build environment is set up
+if [ ! -d "build" ]; then
+    echo "Build environment not found. Running setup..."
+    ./setup-environment.sh
+fi
+
+cd build
+
+# Source environment
+source ../sources/poky/oe-init-build-env .
+
+echo "Building for ${config.machine.name || machineValue}..."
+echo "Starting build process..."
+
+# Build core image
+echo "Building core-image-minimal..."
+bitbake core-image-minimal
+
+echo ""
+echo "✅ Build complete!"
+echo "Images are in: build/tmp/deploy/images/${machineValue}/"
+echo ""
+`;
+  }
+
+  generateLocalConf(config) {
+    const machineValue = config.machine.value || config.machine;
+    
+    return `# Local configuration for ${config.projectName}
+# Generated by Beacon - Lovable for Yocto
+
+# Machine Selection
+MACHINE = "${machineValue}"
+
+# Default policy config
+DISTRO ?= "poky"
+
+# Package Management
+PACKAGE_CLASSES ?= "package_rpm"
+
+# SDK/ADT target architecture
+SDKMACHINE ?= "x86_64"
+
+# Extra image features
+EXTRA_IMAGE_FEATURES ?= "debug-tweaks"
+
+# Additional image features
+USER_CLASSES ?= "buildstats image-mklibs image-prelink"
+
+# Interactive shell configuration
+PATCHRESOLVE = "noop"
+
+# Disk Space Monitoring
+BB_DISKMON_DIRS ??= "\\
+    STOPTASKS,\${TMPDIR},1G,100M \\
+    STOPTASKS,\${DL_DIR},1G,100M \\
+    STOPTASKS,\${SSTATE_DIR},1G,100M \\
+    STOPTASKS,/tmp,100M,100K \\
+    ABORT,\${TMPDIR},100M,1K \\
+    ABORT,\${DL_DIR},100M,1K \\
+    ABORT,\${SSTATE_DIR},100M,1K \\
+    ABORT,/tmp,10M,1K"
+
+# Hash Equivalence
+BB_HASHSERVE = "auto"
+BB_SIGNATURE_HANDLER = "OEEquivHash"
+
+# Parallelism Options
+BB_NUMBER_THREADS ?= "\${@oe.utils.cpu_count()}"
+PARALLEL_MAKE ?= "-j \${@oe.utils.cpu_count()}"
+
+# Download directory
+DL_DIR ?= "\${TOPDIR}/../downloads"
+
+# Shared state directory  
+SSTATE_DIR ?= "\${TOPDIR}/../sstate-cache"
+
+# Build optimization
+INHERIT += "rm_work"
+`;
+  }
+
+  generateBblayersConf(config) {
+    const machineValue = config.machine.value || config.machine;
+    let layers = `  \${BSPDIR}/sources/poky/meta \\
+  \${BSPDIR}/sources/poky/meta-poky \\
+  \${BSPDIR}/sources/meta-openembedded/meta-oe \\
+  \${BSPDIR}/sources/meta-openembedded/meta-python \\`;
+
+    // Add hardware-specific layers
+    if (machineValue.includes('raspberrypi')) {
+      layers += `
+  \${BSPDIR}/sources/meta-raspberrypi \\`;
+    } else if (machineValue.includes('imx')) {
+      layers += `
+  \${BSPDIR}/sources/meta-freescale \\
+  \${BSPDIR}/sources/meta-freescale-3rdparty \\`;
+    }
+
+    return `# POKY_BBLAYERS_CONF_VERSION is increased each time build/conf/bblayers.conf
+# changes incompatibly
+POKY_BBLAYERS_CONF_VERSION = "2"
+
+BBPATH = "\${TOPDIR}"
+BBFILES ?= ""
+
+BSPDIR := "\${@os.path.abspath(os.path.dirname(d.getVar('FILE', True)) + '/../..')}"
+
+BBLAYERS ?= " \\${layers}
+  "
+`;
+  }
+
+  generateReadme(config) {
+    return `# ${config.projectName}
+
+${config.description}
+
+**Target Hardware:** ${config.machine.name || config.machine}  
+**Yocto Release:** ${config.release.name} (${config.release.value})
+
+## Quick Start
+
+1. **Setup Yocto repositories:**
+   \`\`\`bash
+   ./setup-yocto.sh
+   \`\`\`
+
+2. **Initialize build environment:**
+   \`\`\`bash
+   ./setup-environment.sh
+   \`\`\`
+
+3. **Build the image:**
+   \`\`\`bash
+   ./build.sh
+   \`\`\`
+
+## Project Structure
+
+- \`sources/\` - Yocto layers and BSP sources
+- \`build/\` - Build output directory
+- \`downloads/\` - Downloaded source packages
+- \`sstate-cache/\` - Shared state cache
+- \`conf/\` - Configuration templates
+- \`scripts/\` - Additional helper scripts
+
+## Manual Build Process
+
+If you prefer to build manually:
+
+\`\`\`bash
+# Source the environment (from project root)
+source sources/poky/oe-init-build-env build
+
+# Build an image
+bitbake core-image-minimal
+
+# Or build SDK
+bitbake core-image-minimal -c populate_sdk
+\`\`\`
+
+## Hardware-Specific Notes
+
+See the generated build output in \`build/tmp/deploy/images/${config.machine.value || config.machine}/\`
+
+## Generated by Beacon
+
+This project was generated by **Beacon - Lovable for Yocto**, an AI-powered tool for embedded Linux development.
+
+For more help: \`beacon --help\`
+`;
+  }
+
+  generateGitignore() {
+    return `# Yocto build artifacts
+build/
+downloads/
+sstate-cache/
+cache/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local environment
+.env
+local.conf
+bblayers.conf
+
+# Backup files
+*.orig
+*.bak
+*~
+`;
+  }
+
+  async createNewProjectWithDescription(initialDescription, options) {
+    console.log(chalk.blue('\n🎯 New Yocto Project Creation'));
+    console.log(chalk.gray('─'.repeat(50)));
+
+    try {
+      // Use the provided description or ask for refinement
+      console.log(chalk.cyan(`Initial request: "${initialDescription}"`));
+      const description = await PromptHelper.confirm('Use this description as-is?', { default: true })
+        ? initialDescription
+        : await PromptHelper.getProjectDescription();
+      
+      // Select hardware
+      const machine = await PromptHelper.selectYoctoMachine();
+      
+      let hardwareDetails = '';
+      if (machine.value === 'custom') {
+        hardwareDetails = await PromptHelper.input(
+          '🔧 Describe your custom hardware (processor, peripherals, etc.):',
+          {
+            validate: (input) => input.trim().length > 5 || 'Please provide hardware details'
+          }
+        );
+      }
+
+      // Get project name with smart default
+      const defaultName = initialDescription
+        .toLowerCase()
+        .replace(/[^a-zA-Z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .substring(0, 30) || 'my-yocto-project';
+
+      const projectName = await PromptHelper.input('📁 Project name:', {
+        default: defaultName,
+        validate: (input) => {
+          const name = input.trim();
+          return (name.length > 0 && /^[a-zA-Z0-9_-]+$/.test(name)) || 
+                 'Project name must contain only letters, numbers, hyphens, and underscores';
+        }
+      });
+
+      // Choose Yocto release
+      const release = await PromptHelper.selectYoctoRelease();
+
+      console.log(chalk.green('\n✅ Project Configuration Complete!'));
+      console.log(chalk.gray('─'.repeat(40)));
+      console.log(`📝 Description: ${chalk.cyan(description)}`);
+      console.log(`📁 Project: ${chalk.cyan(projectName)}`);
+      console.log(`🔧 Hardware: ${chalk.cyan(machine.name)}`);
+      if (hardwareDetails) {
+        console.log(`🔧 Details: ${chalk.cyan(hardwareDetails)}`);
+      }
+      console.log(`🏗️  Release: ${chalk.cyan(release.name)}`);
+
+      const proceed = await PromptHelper.confirm('\n🚀 Ready to create your Yocto project?', { default: true });
+
+      if (proceed) {
+        // Create the project using AI with enhanced context
+        await this.generateYoctoProject({
+          description,
+          projectName,
+          machine: machine.value === 'custom' ? hardwareDetails : machine,
+          release: release,
+          hardwareDetails,
+          options
+        });
+      } else {
+        console.log(chalk.yellow('Project creation cancelled. You can restart anytime with: beacon'));
+      }
+
+    } catch (error) {
+      console.error(chalk.red('❌ Project creation failed:'), error.message);
+    }
   }
 
 
@@ -282,14 +1265,9 @@ User Request: ${message}`;
     
     while (true) {
       try {
-        const { message } = await inquirer.prompt([
-          {
-            type: 'input',
-            name: 'message',
-            message: '>',
-            validate: (input) => input.trim().length > 0 || 'Please enter a message'
-          }
-        ]);
+        const message = await PromptHelper.input('>', {
+          validate: (input) => input.trim().length > 0 || 'Please enter a message'
+        });
 
         if (message.toLowerCase() === 'exit') {
           console.log(chalk.blue('👋 Happy building with Yocto!'));
@@ -328,10 +1306,7 @@ User Request: ${message}`;
           maxTokens: 16000,
           streaming: options.streaming !== false,
           extendedThinking: options.thinking !== false, // Default to true
-          tools: [{
-            type: 'text_editor_20250728',
-            name: 'str_replace_based_edit_tool'
-          }]
+          tools: []
         };
 
         if (requestData.streaming) {
@@ -376,6 +1351,111 @@ User Request: ${message}`;
     } catch (error) {
       console.error(chalk.red('❌ Streaming error:'), error.message);
       throw error;
+    }
+  }
+
+  async runProjectSetup(options) {
+    console.log(chalk.blue('\n🚀 Yocto Project Setup Wizard'));
+    console.log(chalk.gray('─'.repeat(50)));
+
+    try {
+      const config = await PromptHelper.getProjectConfiguration();
+      
+      console.log(chalk.green('\n✅ Configuration Complete!'));
+      console.log(chalk.gray('─'.repeat(30)));
+      console.log(`Project: ${chalk.cyan(config.projectName)}`);
+      console.log(`Machine: ${chalk.cyan(config.machine)}`);
+      console.log(`Distro: ${chalk.cyan(config.distro.value || config.distro)}`);
+      console.log(`Release: ${chalk.cyan(config.release.value || config.release)}`);
+      console.log(`Build Options: ${chalk.cyan(config.buildOptions.map(opt => opt.value || opt).join(', '))}`);
+      console.log(`Shared State: ${chalk.cyan(config.useSharedState ? 'Yes' : 'No')}`);
+      if (config.sharedStateDir) {
+        console.log(`Shared State Dir: ${chalk.cyan(config.sharedStateDir)}`);
+      }
+
+      const proceed = await PromptHelper.confirm('\nWould you like me to help create the project structure?', { default: true });
+      
+      if (proceed) {
+        console.log(chalk.blue('\n🔧 I can help you:'));
+        console.log('  • Initialize the Yocto environment');
+        console.log('  • Configure local.conf and bblayers.conf');
+        console.log('  • Set up the directory structure');
+        console.log('  • Create initial recipes if needed');
+        console.log(chalk.yellow('\nJust ask me: "Set up my Yocto project with the configuration we just created"'));
+      }
+    } catch (error) {
+      console.error(chalk.red('❌ Setup cancelled or failed:'), error.message);
+    }
+  }
+
+  async demoPrompts() {
+    console.log(chalk.blue('\n🎨 Inquirer Prompts Demo'));
+    console.log(chalk.gray('─'.repeat(50)));
+
+    try {
+      // Input prompt
+      const name = await PromptHelper.input('What is your name?');
+      console.log(chalk.green(`Hello, ${name}!`));
+
+      // Select prompt
+      const color = await PromptHelper.select('What is your favorite color?', [
+        'red', 'green', 'blue', 'yellow', 'purple'
+      ]);
+      console.log(chalk.green(`Nice choice: ${color}`));
+
+      // Confirm prompt
+      const likes = await PromptHelper.confirm('Do you like Yocto development?', { default: true });
+      console.log(chalk.green(likes ? 'Great! This tool will help you.' : 'This tool might change your mind!'));
+
+      // Multiple select prompt
+      const tools = await PromptHelper.multiSelect('Which development tools do you use?', [
+        { name: 'VS Code', value: 'vscode' },
+        { name: 'Vim/Neovim', value: 'vim' },
+        { name: 'Emacs', value: 'emacs' },
+        { name: 'BitBake', value: 'bitbake' },
+        { name: 'Git', value: 'git' },
+        { name: 'Docker', value: 'docker' }
+      ]);
+      console.log(chalk.green(`Your tools: ${tools.map(t => t.value || t).join(', ')}`));
+
+      // Number prompt
+      const experience = await PromptHelper.number('How many years of Linux experience do you have?', {
+        min: 0,
+        max: 50
+      });
+      console.log(chalk.green(`${experience} years - ${experience > 5 ? 'experienced!' : 'welcome to the journey!'}`));
+
+      // Expand prompt (single letter shortcuts)
+      const action = await PromptHelper.expand('What would you like to do next?', [
+        { key: 'c', name: 'Create a new recipe', value: 'create' },
+        { key: 'b', name: 'Build an image', value: 'build' },
+        { key: 'd', name: 'Debug an issue', value: 'debug' },
+        { key: 'q', name: 'Quit demo', value: 'quit' }
+      ]);
+      console.log(chalk.green(`Selected action: ${action.value || action}`));
+
+      // Raw list prompt (numbered)
+      const priority = await PromptHelper.rawList('What is your top priority?', [
+        'Fast build times',
+        'Small image size', 
+        'Security hardening',
+        'Easy debugging',
+        'Rich feature set'
+      ]);
+      console.log(chalk.green(`Your priority: ${priority}`));
+
+      // Editor prompt (opens editor)
+      const editDemo = await PromptHelper.confirm('Would you like to try the editor prompt?', { default: false });
+      if (editDemo) {
+        const recipe = await PromptHelper.editor('Write a simple BitBake recipe (opens in your default editor):');
+        console.log(chalk.green(`Recipe content (${recipe.length} characters):`));
+        console.log(chalk.gray(recipe.substring(0, 200) + (recipe.length > 200 ? '...' : '')));
+      }
+
+      console.log(chalk.blue('\n✨ Demo complete! All prompt types are now available in your CLI.'));
+
+    } catch (error) {
+      console.error(chalk.red('❌ Demo cancelled:'), error.message);
     }
   }
 

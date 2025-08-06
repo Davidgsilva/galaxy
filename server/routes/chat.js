@@ -146,6 +146,61 @@ Provide links to relevant documentation when helpful
 
 Remember: Your primary goal is to help users build robust, secure, and compliant embedded Linux distributions while following industry best practices and maintaining legal compliance.`;
 
+// Store client endpoints for delegation
+const clientEndpoints = new Map();
+
+// Helper function to delegate text editor operations to client
+async function delegateTextEditorToClient(sessionId, toolInput) {
+  if (!sessionId) {
+    throw new Error('Session ID required for text editor operations');
+  }
+
+  // Check if client is registered globally
+  if (!global.fileOperationClient) {
+    throw new Error('No file operation client registered. Make sure the client is running and has called registerForFileOperations().');
+  }
+
+  try {
+    logger.info('Delegating text editor operation to client', { 
+      sessionId, 
+      command: toolInput.command,
+      path: toolInput.path 
+    });
+
+    // Call the client's handleTextEditorOperation method directly
+    const result = await global.fileOperationClient.handleTextEditorOperation(toolInput.command, toolInput);
+
+    return result;
+    
+  } catch (error) {
+    logger.error('Client delegation failed:', error);
+    throw new Error(`File operation failed: ${error.message}`);
+  }
+}
+
+// Endpoint for clients to register their delegation endpoint
+router.post('/register-client-endpoint', (req, res) => {
+  const { sessionId, endpoint } = req.body;
+  
+  if (!sessionId || !endpoint) {
+    return res.status(400).json({
+      success: false,
+      error: 'sessionId and endpoint are required'
+    });
+  }
+
+  clientEndpoints.set(sessionId, endpoint);
+  
+  logger.info('Client endpoint registered', { sessionId, endpoint });
+  
+  res.json({
+    success: true,
+    message: 'Client endpoint registered successfully',
+    sessionId,
+    endpoint
+  });
+});
+
 // Main AI interaction endpoint
 router.post('/', validateChatRequest, async (req, res) => {
   try {
@@ -249,6 +304,7 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
 
       const stream = await AnthropicService.createStreamingMessage(requestData);
       let fullResponse = '';
+      const sessionId = req.headers['x-session-id'] || `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
       stream.on('text', (text) => {
         fullResponse += text;
@@ -257,6 +313,36 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
 
       stream.on('thinking', (thinking) => {
         res.write(`data: ${JSON.stringify({ type: 'thinking', content: thinking })}\n\n`);
+      });
+
+      stream.on('tool_use', async (toolUse) => {
+        try {
+          if (toolUse.name === 'str_replace_based_edit_tool') {
+            logger.info('Processing text editor tool use in streaming mode', { 
+              toolId: toolUse.id,
+              command: toolUse.input.command,
+              sessionId 
+            });
+            
+            // Delegate to client
+            const toolResult = await delegateTextEditorToClient(sessionId, toolUse.input);
+            
+            // Send tool result back to stream
+            res.write(`data: ${JSON.stringify({ 
+              type: 'tool_result', 
+              toolId: toolUse.id,
+              result: toolResult 
+            })}\n\n`);
+            
+            logger.info('Tool operation completed', { toolId: toolUse.id, result: toolResult });
+          }
+        } catch (error) {
+          logger.error('Tool use error in streaming:', error);
+          res.write(`data: ${JSON.stringify({ 
+            type: 'error', 
+            error: `Tool operation failed: ${error.message}` 
+          })}\n\n`);
+        }
       });
 
       stream.on('end', async (data) => {
@@ -282,13 +368,55 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       });
 
     } else {
-      // Handle regular response
+      // Handle regular response with tool use support
       const response = await AnthropicService.createMessage(requestData);
+      
+      // Process tool uses if present
+      let processedResponse = response;
+      const sessionId = req.headers['x-session-id'] || `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      if (response.content && Array.isArray(response.content)) {
+        for (const block of response.content) {
+          if (block.type === 'tool_use' && block.name === 'str_replace_based_edit_tool') {
+            try {
+              // Delegate text editor operations to client
+              const toolResult = await delegateTextEditorToClient(sessionId, block.input);
+              
+              // Continue conversation with tool result
+              const toolResponse = await AnthropicService.createMessage({
+                ...requestData,
+                messages: [
+                  ...requestData.messages,
+                  {
+                    role: 'assistant',
+                    content: response.content
+                  },
+                  {
+                    role: 'user',
+                    content: [
+                      {
+                        type: 'tool_result',
+                        tool_use_id: block.id,
+                        content: JSON.stringify(toolResult)
+                      }
+                    ]
+                  }
+                ]
+              });
+              
+              processedResponse = toolResponse;
+            } catch (error) {
+              logger.error('Tool delegation error:', error);
+              // Continue with original response if tool delegation fails
+            }
+          }
+        }
+      }
       
       // Extract response text from content array
       let responseText = '';
-      if (response.content && Array.isArray(response.content)) {
-        responseText = response.content
+      if (processedResponse.content && Array.isArray(processedResponse.content)) {
+        responseText = processedResponse.content
           .filter(block => block.type === 'text')
           .map(block => block.text)
           .join('\n');
@@ -301,12 +429,12 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       }
 
       // Extract tool uses and citations if present
-      const toolUses = response.content ? 
-        response.content.filter(block => block.type === 'tool_use') : [];
+      const toolUses = processedResponse.content ? 
+        processedResponse.content.filter(block => block.type === 'tool_use') : [];
       
       const citations = [];
-      if (response.content) {
-        response.content.forEach(block => {
+      if (processedResponse.content) {
+        processedResponse.content.forEach(block => {
           if (block.type === 'text' && block.citations) {
             citations.push(...block.citations);
           }
@@ -316,8 +444,8 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       res.json({
         success: true,
         response: responseText,
-        usage: response.usage,
-        model: response.model,
+        usage: processedResponse.usage,
+        model: processedResponse.model,
         toolUses,
         citations,
         useYoctoPrompt,
