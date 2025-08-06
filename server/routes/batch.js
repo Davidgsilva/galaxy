@@ -197,10 +197,6 @@ async function executeOperation(operation, index) {
         result = await executeChatOperation(operation);
         break;
       
-      case 'file':
-        result = await executeFileOperation(operation);
-        break;
-      
       case 'web_search':
         result = await executeWebSearchOperation(operation);
         break;
@@ -210,7 +206,7 @@ async function executeOperation(operation, index) {
         break;
       
       default:
-        throw new Error(`Unknown operation type: ${operation.type}`);
+        throw new Error(`Unknown operation type: ${operation.type}. Supported types: chat, web_search, computer`);
     }
 
     const duration = Date.now() - startTime;
@@ -271,47 +267,6 @@ async function executeChatOperation(operation) {
   };
 }
 
-async function executeFileOperation(operation) {
-  const axios = require('axios');
-  const { filePath, fileOperation, content, instruction } = operation;
-
-  // Make internal API call to file routes
-  const baseUrl = process.env.INTERNAL_API_URL || 'http://localhost:3001';
-  
-  switch (fileOperation) {
-    case 'create':
-      const createResponse = await axios.post(`${baseUrl}/api/files/create`, {
-        filePath,
-        content,
-        operation: 'create'
-      });
-      return createResponse.data;
-
-    case 'read':
-      const readResponse = await axios.get(`${baseUrl}/api/files/read`, {
-        params: { filePath }
-      });
-      return readResponse.data;
-
-    case 'update':
-      const updateResponse = await axios.put(`${baseUrl}/api/files/update`, {
-        filePath,
-        instruction,
-        content,
-        operation: 'update'
-      });
-      return updateResponse.data;
-
-    case 'delete':
-      const deleteResponse = await axios.delete(`${baseUrl}/api/files/delete`, {
-        data: { filePath, operation: 'delete' }
-      });
-      return deleteResponse.data;
-
-    default:
-      throw new Error(`Unknown file operation: ${fileOperation}`);
-  }
-}
 
 async function executeWebSearchOperation(operation) {
   const { query, maxResults = 5, allowedDomains, blockedDomains } = operation;
@@ -384,44 +339,40 @@ async function executeComputerOperation(operation) {
 // Batch operation templates
 router.get('/templates', (req, res) => {
   const templates = {
-    'code-review': {
-      name: 'Code Review Batch',
-      description: 'Review multiple code files for quality, security, and best practices',
+    'yocto-setup': {
+      name: 'Yocto Project Setup',
+      description: 'Generate Yocto project setup guidance and configuration',
       operations: [
         {
-          id: 'read-files',
-          type: 'file',
-          fileOperation: 'read',
-          filePath: '**/*.js',
-          analyze: 'security'
+          id: 'hardware-analysis',
+          type: 'chat',
+          message: 'Analyze hardware requirements and recommend Yocto configuration'
         },
         {
-          id: 'analyze-structure',
+          id: 'layer-research',
+          type: 'web_search',
+          query: 'Yocto meta layers for embedded hardware 2025'
+        },
+        {
+          id: 'setup-guide',
           type: 'chat',
-          message: 'Analyze the overall code structure and suggest improvements'
+          message: 'Generate step-by-step Yocto setup instructions'
         }
       ]
     },
-    'documentation-generation': {
-      name: 'Documentation Generation',
-      description: 'Generate documentation for code files',
+    'hardware-research': {
+      name: 'Hardware Research',
+      description: 'Research hardware specifications and compatibility',
       operations: [
         {
-          id: 'read-source',
-          type: 'file',
-          fileOperation: 'read',
-          filePath: 'src/**/*.js'
+          id: 'spec-search',
+          type: 'web_search',
+          query: 'hardware specifications and datasheet'
         },
         {
-          id: 'generate-docs',
+          id: 'compatibility-check',
           type: 'chat',
-          message: 'Generate comprehensive documentation for the analyzed code'
-        },
-        {
-          id: 'create-readme',
-          type: 'file',
-          fileOperation: 'create',
-          filePath: 'README.md'
+          message: 'Analyze hardware compatibility with Yocto'
         }
       ]
     },
@@ -430,14 +381,14 @@ router.get('/templates', (req, res) => {
       description: 'Perform multiple web searches and compile results',
       operations: [
         {
-          id: 'search-trends',
+          id: 'search-primary',
           type: 'web_search',
-          query: 'latest web development trends 2025'
+          query: 'primary research topic'
         },
         {
-          id: 'search-tools',
+          id: 'search-secondary',
           type: 'web_search',
-          query: 'best development tools 2025'
+          query: 'secondary research topic'
         },
         {
           id: 'compile-report',

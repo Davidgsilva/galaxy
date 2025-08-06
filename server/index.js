@@ -15,7 +15,7 @@ const cacheRoutes = require('./routes/cache');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Configure logging
+// Configure logging with usage tracking
 const logger = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
@@ -23,10 +23,11 @@ const logger = winston.createLogger({
     winston.format.errors({ stack: true }),
     winston.format.json()
   ),
-  defaultMeta: { service: 'beacon-proxy' },
+  defaultMeta: { service: 'yocto-beacon-proxy' },
   transports: [
     new winston.transports.File({ filename: 'error.log', level: 'error' }),
     new winston.transports.File({ filename: 'combined.log' }),
+    new winston.transports.File({ filename: 'usage.log', level: 'info' }),
     new winston.transports.Console({
       format: winston.format.simple()
     })
@@ -63,13 +64,45 @@ app.use(async (req, res, next) => {
   }
 });
 
-// Request logging
+// Request logging with usage tracking
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`, {
-    ip: req.ip,
-    userAgent: req.get('User-Agent'),
-    body: req.method === 'GET' ? undefined : req.body
-  });
+  const startTime = Date.now();
+
+  // Override res.json to capture response data for usage tracking
+  const originalJson = res.json;
+  res.json = function(body) {
+    const duration = Date.now() - startTime;
+
+    // Log usage metrics for Claude API calls
+    if (req.path.includes('/api/chat') || req.path.includes('/api/batch')) {
+      logger.info('API_USAGE', {
+        endpoint: req.path,
+        method: req.method,
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+        duration,
+        timestamp: new Date().toISOString(),
+        success: res.statusCode < 400,
+        // Token usage if available in response
+        tokenUsage: body?.usage || body?.results?.[0]?.result?.usage,
+        // Model used
+        model: body?.model || body?.results?.[0]?.result?.model,
+        // Session tracking
+        sessionId: req.headers['x-session-id'] || 'anonymous'
+      });
+    }
+
+    // Regular request logging
+    logger.info(`${req.method} ${req.path}`, {
+      ip: req.ip,
+      status: res.statusCode,
+      duration,
+      timestamp: new Date().toISOString()
+    });
+
+    return originalJson.call(this, body);
+  };
+
   next();
 });
 

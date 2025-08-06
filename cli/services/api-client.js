@@ -1,5 +1,6 @@
 const axios = require('axios');
 const chalk = require('chalk');
+const LocalFileService = require('./local-file-service');
 
 class ApiClient {
   constructor() {
@@ -7,6 +8,8 @@ class ApiClient {
     this.timeout = 60000; // 60 seconds
     this.retryAttempts = 3;
     this.retryDelay = 1000; // 1 second
+    this.localFileService = new LocalFileService();
+    this.sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
   setProxyUrl(url) {
@@ -20,6 +23,7 @@ class ApiClient {
       timeout: this.timeout,
       headers: {
         'Content-Type': 'application/json',
+        'x-session-id': this.sessionId,
         ...options.headers
       },
       ...options
@@ -370,6 +374,129 @@ class ApiClient {
     }
 
     return stats;
+  }
+
+  // File operation delegation handler (used by server)
+  async handleTextEditorOperation(operation, args) {
+    try {
+      console.log(chalk.yellow(`🔧 Executing file operation: ${operation} on ${args.path || 'unknown'}`));
+
+      switch (operation) {
+        case 'view':
+          return await this.handleView(args.path);
+        
+        case 'str_replace':
+          return await this.handleStrReplace(args.path, args.old_str, args.new_str);
+        
+        case 'create':
+          return await this.handleCreate(args.path, args.file_text || '');
+        
+        case 'insert':
+          return await this.handleInsert(args.path, args.new_str, args.insert_line);
+        
+        default:
+          throw new Error(`Unknown text editor operation: ${operation}`);
+      }
+    } catch (error) {
+      console.log(chalk.red(`❌ File operation failed: ${error.message}`));
+      throw error;
+    }
+  }
+
+  async handleView(filePath) {
+    const result = await this.localFileService.readFile(filePath);
+    
+    if (result.success && result.files?.[0]) {
+      const file = result.files[0];
+      return `File: ${filePath}\nLines: ${file.content.split('\n').length}\nSize: ${file.size} bytes\n\nContent:\n${file.content}`;
+    } else {
+      // Try as directory
+      const dirResult = await this.localFileService.listDirectory(filePath);
+      if (dirResult.success) {
+        const itemsText = dirResult.items.map(item => `${item.type === 'directory' ? '📁' : '📄'} ${item.name}`).join('\n');
+        return `Directory: ${filePath}\nItems: ${dirResult.totalItems}\n\nContents:\n${itemsText}`;
+      }
+    }
+    
+    throw new Error('File or directory not found');
+  }
+
+  async handleStrReplace(filePath, oldStr, newStr) {
+    // Read current content
+    const readResult = await this.localFileService.readFile(filePath);
+    if (!readResult.success) {
+      throw new Error('File not found');
+    }
+
+    const currentContent = readResult.files[0].content;
+    
+    // Check if old string exists
+    if (!currentContent.includes(oldStr)) {
+      throw new Error('String not found in file');
+    }
+
+    // Check for multiple occurrences
+    const occurrences = (currentContent.match(new RegExp(oldStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+    if (occurrences > 1) {
+      throw new Error(`String appears ${occurrences} times in file. Please be more specific.`);
+    }
+
+    // Replace content
+    const newContent = currentContent.replace(oldStr, newStr);
+    const updateResult = await this.localFileService.updateFile(filePath, newContent);
+
+    if (updateResult.success) {
+      const linesChanged = newContent.split('\n').length - currentContent.split('\n').length;
+      return `Text replaced successfully in ${filePath}.\nLines changed: ${linesChanged}\nCharacters changed: ${newContent.length - currentContent.length}`;
+    } else {
+      throw new Error('Failed to update file');
+    }
+  }
+
+  async handleCreate(filePath, fileText) {
+    const result = await this.localFileService.createFile(filePath, fileText);
+    
+    if (result.success) {
+      return `File created successfully: ${filePath}\nSize: ${fileText.length} bytes\nLines: ${fileText.split('\n').length}`;
+    } else {
+      throw new Error('Failed to create file');
+    }
+  }
+
+  async handleInsert(filePath, newStr, insertLine) {
+    // Read current content
+    const readResult = await this.localFileService.readFile(filePath);
+    if (!readResult.success) {
+      throw new Error('File not found');
+    }
+
+    const currentContent = readResult.files[0].content;
+    const lines = currentContent.split('\n');
+
+    // Validate insert line
+    if (insertLine < 0 || insertLine > lines.length) {
+      throw new Error(`Invalid line number: ${insertLine}. File has ${lines.length} lines.`);
+    }
+
+    // Insert new content
+    lines.splice(insertLine, 0, newStr);
+    const newContent = lines.join('\n');
+
+    const updateResult = await this.localFileService.updateFile(filePath, newContent);
+
+    if (updateResult.success) {
+      return `Content inserted successfully at line ${insertLine} in ${filePath}.\nNew total lines: ${lines.length}`;
+    } else {
+      throw new Error('Failed to update file');
+    }
+  }
+
+  // Register this client instance globally for server access
+  registerForFileOperations() {
+    console.log(chalk.blue('📝 Registering client for file operations...'));
+    global.fileOperationClient = this;
+    console.log(chalk.green('✅ Client registered for file operations'));
+    return true;
   }
 }
 

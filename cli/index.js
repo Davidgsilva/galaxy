@@ -14,6 +14,9 @@ class BeaconYoctoCLI {
     this.program = new Command();
     this.apiClient = new ApiClient();
     
+    // Register for file operations immediately
+    this.apiClient.registerForFileOperations();
+    
     this.setupCommands();
   }
 

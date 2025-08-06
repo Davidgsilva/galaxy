@@ -110,27 +110,36 @@ beacon "Add security hardening to my kernel configuration"
 ```
 ┌─────────────┐    HTTP/JSON    ┌──────────────┐    API Calls    ┌─────────────┐
 │   Beacon    │ ──────────────> │ Proxy Server │ ──────────────> │  Anthropic  │
-│  CLI Tool   │                 │ (Node.js)    │                 │   Claude    │
-└─────────────┘                 └──────────────┘                 └─────────────┘
+│  CLI Tool   │                 │ (Usage Track) │                 │   Claude    │
+│             │                 │              │                 │             │
+│ Local Files │ ◄──────────────┐ │              │                 │             │
+│ Operations  │                │ │              │                 │             │
+└─────────────┘                │ └──────────────┘                 └─────────────┘
+       │                       │
+       ▼                       │
+┌─────────────┐                │
+│ Local File  │                │
+│ System      │ ───────────────┘
+└─────────────┘
 ```
 
 ### CLI Application (Node.js)
-- **Simple Chat Interface**: Like `claude` or `gemini` CLI tools
-- **Streaming Responses**: Real-time text output as AI generates responses
-- **File Operations**: Text editor tool for reading/writing local files
-- **Context Management**: Maintains conversation history
+- **Local File Operations**: Direct filesystem access for Yocto project creation
+- **AI Integration**: Chat interface for guidance and code generation
+- **Streaming Responses**: Real-time AI responses with thinking visualization
+- **Session Tracking**: Unique session IDs for usage monitoring
 
 ### Proxy Server (Node.js/Express)
-- **Anthropic API Integration**: Claude Sonnet 4 with text editor capabilities
-- **Yocto Expertise**: Specialized system prompts for embedded Linux
-- **Security**: Rate limiting, input validation, CORS policies
-- **Performance**: Caching, streaming, error handling
+- **Usage Tracking**: Monitor Claude API usage and costs
+- **Claude API Proxy**: Secure relay to Anthropic services
+- **No File Access**: Server only handles AI requests, not files
+- **Security**: Rate limiting, session tracking, CORS policies
 
-### AI Capabilities
-- **Text Editor Tool**: Can create, read, update, delete local files
-- **Yocto Specialization**: Deep BitBake, OpenEmbedded, BSP knowledge
-- **License Compliance**: Automatic GPLv3 detection and warnings
-- **Security Best Practices**: Kernel hardening, secure boot guidance
+### Local File Service
+- **Direct Filesystem**: All file operations happen locally on client
+- **Security**: Built-in path validation and safety checks
+- **Performance**: No network overhead for file operations
+- **Privacy**: Files never leave the local machine
 
 ## 🔒 Security & Compliance
 
