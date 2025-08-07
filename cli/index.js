@@ -179,14 +179,19 @@ class BeaconYoctoCLI {
     this.program
       .argument('[message]', 'message to send to Yocto AI assistant')
       .option('-s, --streaming', 'enable streaming responses', true)
-      .option('-t, --thinking', 'enable extended thinking mode', true)
+      .option('-t, --thinking', 'enable extended thinking mode', false)
       .option('-m, --model <model>', 'AI model to use', 'claude-sonnet-4-20250514')
       .option('--temperature <temp>', 'temperature for AI responses', '0.1')
       .action(async (message, options) => {
         if (!message) {
           await this.startBeacon(options);
         } else {
-          await this.sendMessage(message, options);
+          // Check if this is a project creation request
+          if (this.isProjectCreationRequest(message)) {
+            await this.createNewProjectWithDescription(message, options);
+          } else {
+            await this.sendMessage(message, options);
+          }
         }
       });
 
@@ -233,10 +238,10 @@ User Request: ${message}`;
         message: contextualMessage,
         context: [],
         model: options.model,
-        temperature: options.thinking !== false ? 1 : parseFloat(options.temperature), // Must be 1 when thinking is enabled
+        temperature: options.thinking === true ? 1 : parseFloat(options.temperature), // Must be 1 when thinking is enabled
         maxTokens: 16000,
         streaming: options.streaming,
-        extendedThinking: options.thinking !== false, // Default to true
+        extendedThinking: options.thinking === true, // Default to false
         useYoctoPrompt: true,
         tools: []
       };
@@ -509,7 +514,7 @@ User Request: ${message}`;
         temperature: 1,
         maxTokens: 16000,
         streaming: true,
-        extendedThinking: true,
+        extendedThinking: false,
         useYoctoPrompt: true,
         tools: [
           {
@@ -530,17 +535,21 @@ User Request: ${message}`;
       this.showProgressStep('📁 Creating Files', 'Generating project structure locally');
       await this.createProjectFilesLocally(config, aiResponse);
 
-      // Step 5: Finalization
-      this.showProgressStep('✨ Finalizing', 'Setting up executable scripts');
+      // Step 5: Repository Cloning
+      this.showProgressStep('📦 Cloning Repositories', 'Setting up Yocto sources');
+      await this.executeRepositorySetup(config);
+
+      // Step 6: Finalization
+      this.showProgressStep('✨ Finalizing', 'Project ready to build');
       await this.delay(500);
 
       console.log(chalk.green('\n🎉 Project generation complete!'));
       console.log(chalk.gray('─'.repeat(60)));
-      console.log(chalk.blue('📁 Your Yocto project is ready!'));
+      console.log(chalk.blue(`📁 Your Yocto project is ready: ${config.projectName}/`));
       console.log(chalk.yellow('💡 Next steps:'));
       console.log(`   1. cd ${config.projectName}`);
-      console.log('   2. source oe-init-build-env');
-      console.log('   3. bitbake core-image-minimal');
+      console.log('   2. ./setup-environment.sh');
+      console.log('   3. ./build.sh');
       console.log(chalk.blue('\n💬 Continue with: beacon (for more help)'));
 
     } catch (error) {
@@ -575,6 +584,202 @@ User Request: ${message}`;
 
   async delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  isProjectCreationRequest(message) {
+    const lowerMessage = message.toLowerCase();
+    
+    // Check for project creation patterns
+    const creationPatterns = [
+      /create.*yocto.*project/i,
+      /set.*up.*yocto.*project/i,
+      /new.*yocto.*project/i,
+      /generate.*yocto.*project/i,
+      /build.*yocto.*project/i,
+      /start.*yocto.*project/i,
+      /(create|make|generate|setup|build).*project.*for.*(raspberry|pi|imx|beagle|xilinx|intel)/i,
+      /yocto.*for.*(raspberry|pi|imx|beagle|xilinx|intel)/i
+    ];
+    
+    return creationPatterns.some(pattern => pattern.test(message));
+  }
+
+  async executeRepositorySetup(config) {
+    const path = require('path');
+    const { spawn } = require('child_process');
+    const fs = require('fs').promises;
+    
+    const projectPath = path.resolve(config.projectName);
+    const setupScriptPath = path.join(projectPath, 'setup-yocto.sh');
+    
+    try {
+      // Verify setup script exists
+      await fs.access(setupScriptPath);
+      
+      // Show initial cloning message
+      console.log(chalk.cyan('📦 Cloning Yocto repositories...'));
+      
+      return new Promise((resolve, reject) => {
+        const child = spawn('bash', [setupScriptPath], {
+          cwd: projectPath,
+          stdio: ['inherit', 'pipe', 'pipe']
+        });
+
+        let currentRepo = '';
+        let operationStartTime = Date.now();
+        
+        // Track cloning operations with real-time feedback
+        const repositories = [
+          { name: 'Poky (core Yocto)', pattern: /Cloning Poky|poky\.git/i, completed: false },
+          { name: 'meta-openembedded', pattern: /Cloning meta-openembedded|meta-openembedded\.git/i, completed: false },
+          { name: 'meta-raspberrypi', pattern: /Cloning.*Raspberry|meta-raspberrypi\.git/i, completed: false },
+          { name: 'meta-freescale', pattern: /Cloning.*NXP|meta-freescale\.git/i, completed: false }
+        ];
+
+        const processOutput = (data, isError = false) => {
+          const lines = data.toString().split('\n').filter(line => line.trim());
+          
+          for (const line of lines) {
+            // Check if this line indicates a new cloning operation
+            const repo = repositories.find(r => !r.completed && r.pattern.test(line));
+            
+            if (repo) {
+              // Complete previous operation if there was one
+              if (currentRepo) {
+                const duration = ((Date.now() - operationStartTime) / 1000).toFixed(1);
+                this.showOperationComplete(null, `(${duration}s)`);
+              }
+              
+              // Start new operation
+              currentRepo = repo.name;
+              operationStartTime = Date.now();
+              this.showOperationStart(`📦 Cloning ${repo.name}`);
+              repo.completed = true;
+            }
+            
+            // Check for completion indicators
+            else if (line.includes('✅') || line.includes('complete') || 
+                     line.match(/Already up to date|already exists/i)) {
+              if (currentRepo) {
+                const duration = ((Date.now() - operationStartTime) / 1000).toFixed(1);
+                this.showOperationComplete(null, `(${duration}s)`);
+                currentRepo = '';
+              }
+            }
+            
+            // Check for errors
+            else if (isError || line.toLowerCase().includes('error') || 
+                     line.toLowerCase().includes('failed')) {
+              if (currentRepo) {
+                const duration = ((Date.now() - operationStartTime) / 1000).toFixed(1);
+                this.showOperationError(line, duration);
+                currentRepo = '';
+              } else {
+                console.error(chalk.red(`❌ ${line}`));
+              }
+            }
+          }
+        };
+
+        child.stdout.on('data', (data) => processOutput(data, false));
+        child.stderr.on('data', (data) => processOutput(data, true));
+
+        child.on('close', (code) => {
+          // Complete any remaining operation
+          if (currentRepo) {
+            const duration = ((Date.now() - operationStartTime) / 1000).toFixed(1);
+            if (code === 0) {
+              this.showOperationComplete(null, `(${duration}s)`);
+            } else {
+              this.showOperationError('Clone failed', duration);
+            }
+          }
+
+          if (code === 0) {
+            console.log(chalk.green(`\n✅ Repository setup completed successfully`));
+            this.validateRepositories(config).then(resolve).catch(reject);
+          } else {
+            const error = new Error(`Repository setup failed with exit code ${code}`);
+            reject(error);
+          }
+        });
+
+        child.on('error', (error) => {
+          if (currentRepo) {
+            const duration = ((Date.now() - operationStartTime) / 1000).toFixed(1);
+            this.showOperationError(error.message, duration);
+          }
+          reject(new Error(`Failed to execute setup script: ${error.message}`));
+        });
+      });
+
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        throw new Error('Setup script not found. File generation may have failed.');
+      }
+      throw new Error(`Repository setup failed: ${error.message}`);
+    }
+  }
+
+  async validateRepositories(config) {
+    const path = require('path');
+    const fs = require('fs').promises;
+    
+    const projectPath = path.resolve(config.projectName);
+    const requiredPaths = [
+      'sources/poky',
+      'sources/meta-openembedded'
+    ];
+    
+    // Add hardware-specific validation
+    const machineValue = config.machine.value || config.machine;
+    if (typeof machineValue === 'string' && machineValue.includes('raspberrypi')) {
+      requiredPaths.push('sources/meta-raspberrypi');
+    } else if (typeof machineValue === 'string' && machineValue.includes('imx')) {
+      requiredPaths.push('sources/meta-freescale');
+    }
+    
+    const validationResults = [];
+    
+    for (const repoPath of requiredPaths) {
+      const fullPath = path.join(projectPath, repoPath);
+      try {
+        const stats = await fs.stat(fullPath);
+        if (stats.isDirectory()) {
+          // Check if it's a git repository
+          const gitPath = path.join(fullPath, '.git');
+          try {
+            await fs.access(gitPath);
+            validationResults.push({ path: repoPath, status: 'valid', type: 'git' });
+          } catch {
+            validationResults.push({ path: repoPath, status: 'directory', type: 'non-git' });
+          }
+        } else {
+          validationResults.push({ path: repoPath, status: 'invalid', error: 'Not a directory' });
+        }
+      } catch (error) {
+        validationResults.push({ path: repoPath, status: 'missing', error: error.message });
+      }
+    }
+    
+    const validRepos = validationResults.filter(r => r.status === 'valid').length;
+    const totalExpected = requiredPaths.length;
+    
+    if (validRepos === totalExpected) {
+      console.log(chalk.green(`🔍 Validated ${validRepos}/${totalExpected} repositories successfully`));
+    } else {
+      console.log(chalk.yellow(`⚠️  Validation: ${validRepos}/${totalExpected} repositories found`));
+      
+      const missing = validationResults.filter(r => r.status === 'missing');
+      if (missing.length > 0) {
+        console.log(chalk.red('Missing repositories:'));
+        missing.forEach(repo => {
+          console.log(chalk.red(`  ❌ ${repo.path}`));
+        });
+        
+        throw new Error(`Repository validation failed: ${missing.length} repositories missing`);
+      }
+    }
   }
 
   async handleStreamingResponseWithProgress(requestData, config) {
@@ -1148,6 +1353,28 @@ bblayers.conf
     try {
       // Use the provided description or ask for refinement
       console.log(chalk.cyan(`Initial request: "${initialDescription}"`));
+      
+      // Check if we're in a good location for project creation
+      const cwd = process.cwd();
+      const shouldCreateDir = !cwd.includes('yocto') && !cwd.endsWith('/projects') && !cwd.endsWith('/workspace');
+      
+      if (shouldCreateDir) {
+        console.log(chalk.yellow(`\n💡 Current directory: ${cwd}`));
+        console.log(chalk.yellow('Recommendation: Create project in a dedicated directory'));
+        
+        const createInSubdir = await PromptHelper.confirm('Create project in a subdirectory?', { default: true });
+        if (createInSubdir) {
+          const subdirName = await PromptHelper.input('Directory name:', { default: 'yocto-projects' });
+          const fs = require('fs').promises;
+          const path = require('path');
+          const newDir = path.resolve(subdirName);
+          
+          await fs.mkdir(newDir, { recursive: true });
+          process.chdir(newDir);
+          console.log(chalk.green(`✅ Created and switched to: ${newDir}`));
+        }
+      }
+      
       const description = await PromptHelper.confirm('Use this description as-is?', { default: true })
         ? initialDescription
         : await PromptHelper.getProjectDescription();
@@ -1284,6 +1511,14 @@ bblayers.conf
           continue;
         }
 
+        // Check if this is a project creation request
+        if (this.isProjectCreationRequest(message)) {
+          await this.createNewProjectWithDescription(message, options);
+          // Exit interactive mode after project creation
+          console.log(chalk.blue('\n💬 Project created! Run beacon again for more help.'));
+          break;
+        }
+
         // Add user message to context
         context.push({ role: 'user', content: message });
 
@@ -1302,10 +1537,10 @@ User Request: ${message}`;
           context: context.slice(0, -1),
           useYoctoPrompt: true,
           model: options.model || 'claude-sonnet-4-20250514',
-          temperature: options.thinking !== false ? 1 : 0.1, // Must be 1 when thinking is enabled
+          temperature: options.thinking === true ? 1 : 0.1, // Must be 1 when thinking is enabled
           maxTokens: 16000,
           streaming: options.streaming !== false,
-          extendedThinking: options.thinking !== false, // Default to true
+          extendedThinking: options.thinking === true, // Default to false
           tools: []
         };
 
