@@ -491,6 +491,30 @@ class ApiClient {
     }
   }
 
+  // Yocto project generation with streaming support
+  async generateYoctoProject(data) {
+    try {
+      const { projectName, description, streaming = true } = data;
+      
+      if (streaming) {
+        return await this.streamRequest('/api/chat/yocto/generate-project', {
+          projectName,
+          description,
+          streaming: true
+        });
+      } else {
+        const response = await this.makeRequest('/api/chat/yocto/generate-project', {
+          projectName,
+          description,
+          streaming: false
+        });
+        return response;
+      }
+    } catch (error) {
+      throw new Error(`Yocto project generation failed: ${error.message}`);
+    }
+  }
+
   // Register this client instance globally for server access
   registerForFileOperations() {
     console.log(chalk.blue('📝 Registering client for file operations...'));

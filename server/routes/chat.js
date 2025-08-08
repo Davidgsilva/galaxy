@@ -694,6 +694,245 @@ Focus on practical solutions and proper Yocto practices.`;
   }
 });
 
+// Yocto project generation endpoint
+router.post('/yocto/generate-project', async (req, res) => {
+  try {
+    const { projectName, description, streaming = false } = req.body;
+    const sessionId = req.headers['x-session-id'] || `project_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Build the comprehensive project generation prompt on the server side
+    const projectPrompt = `I need you to create a complete Yocto Project for embedded Linux development. This is like "Lovable for Yocto" - I want to provide real-time feedback to the user about what you're doing, similar to how Claude Code shows progress.
+
+PROJECT DETAILS:
+- Name: ${projectName}
+- Description: ${description}
+- Yocto Release: Latest stable (default branch)
+
+IMPORTANT - PROVIDE PROGRESS FEEDBACK:
+As you work, clearly describe what you're doing at each step. Use phrases like:
+- "Creating project directory structure..."
+- "Writing setup script for cloning Yocto repositories..."
+- "Writing local.conf with target hardware configuration..."
+- "Generating BSP layer for hardware..."
+- "Creating build scripts..."
+- "Writing documentation and setup guides..."
+
+TASK: Create a complete Yocto project structure including:
+
+1. **Project Directory Setup**:
+   - Create project directory: ${projectName}
+   - Create standard Yocto directory structure (sources/, build/, downloads/, sstate-cache/)
+   - Generate .gitignore for Yocto projects
+
+2. **Repository Setup Scripts**:
+   - Create setup-yocto.sh script that clones the necessary repositories:
+     * git clone git://git.yoctoproject.org/poky.git sources/poky (latest stable)
+     * git clone git://git.openembedded.org/meta-openembedded sources/meta-openembedded (latest stable)
+     * Hardware-specific layers based on the target machine
+   - Create environment setup script (setup-environment.sh)
+   - Make scripts executable and well-documented
+
+3. **Configuration Templates**:
+   - local.conf template with hardware-specific settings based on project description
+   - bblayers.conf template with required layers for the hardware
+   - site.conf for build optimizations (parallel make, sstate, downloads cache)
+   - auto-setup.sh to initialize build environment
+
+4. **Hardware-Specific Research & Setup**:
+   - Use web_search to find latest BSP information based on project description
+   - Research required layers and dependencies
+   - Create hardware-specific configuration notes
+   - Add hardware setup instructions
+
+5. **Build Scripts & Automation**:
+   - build.sh script for common build commands
+   - clean.sh for cleaning builds
+   - flash.sh script with hardware-specific flashing instructions
+   - Environment validation script
+
+6. **Documentation & Guides**:
+   - README.md with complete setup and build instructions
+   - HARDWARE.md with target hardware specific notes
+   - BUILD.md with build options and troubleshooting
+   - Include all git clone commands and setup steps
+
+7. **Research Current Best Practices**:
+   - Use web_search to find latest Yocto documentation
+   - Look up target hardware BSP layers and setup guides
+   - Find community examples and best practices
+
+CRITICAL INSTRUCTIONS:
+- Use the text_editor tool to create ALL files and scripts
+- Use web_search to research current Yocto practices and BSP information
+- Create scripts that users can run to automatically clone Yocto repositories
+- Include specific git clone commands in your scripts:
+  * git clone git://git.yoctoproject.org/poky.git (latest stable branch)
+  * git clone git://git.openembedded.org/meta-openembedded (latest stable branch)
+  * Add hardware-specific layer repositories
+- Make everything executable and well-documented
+- Provide running commentary on what you're creating
+- Include validation steps and error handling in scripts
+- Optimize for target hardware based on project description
+
+Create a complete, production-ready Yocto project structure that includes all necessary scripts for users to clone repositories and start building immediately. Focus on creating setup scripts rather than trying to clone repositories directly.`;
+
+    const requestData = {
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 16000,
+      temperature: 1,
+      system: YOCTO_SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: projectPrompt
+      }],
+      tools: [
+        {
+          type: 'text_editor_20250728',
+          name: 'str_replace_based_edit_tool'
+        },
+        {
+          type: 'web_search_20250305',
+          name: 'web_search'
+        }
+      ]
+    };
+
+    if (streaming) {
+      // Handle streaming response for project generation
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+
+      const stream = await AnthropicService.createStreamingMessage(requestData);
+      let fullResponse = '';
+
+      stream.on('text', (text) => {
+        fullResponse += text;
+        res.write(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`);
+      });
+
+      stream.on('thinking', (thinking) => {
+        res.write(`data: ${JSON.stringify({ type: 'thinking', content: thinking })}\n\n`);
+      });
+
+      stream.on('tool_use', async (toolUse) => {
+        try {
+          if (toolUse.name === 'str_replace_based_edit_tool') {
+            logger.info('Processing text editor tool use for project generation', { 
+              toolId: toolUse.id,
+              command: toolUse.input.command,
+              sessionId 
+            });
+            
+            // Delegate to client
+            const toolResult = await delegateTextEditorToClient(sessionId, toolUse.input);
+            
+            // Send tool result back to stream
+            res.write(`data: ${JSON.stringify({ 
+              type: 'tool_result', 
+              toolId: toolUse.id,
+              result: toolResult 
+            })}\n\n`);
+            
+            logger.info('Tool operation completed for project generation', { toolId: toolUse.id });
+          }
+        } catch (error) {
+          logger.error('Tool use error in project generation streaming:', error);
+          res.write(`data: ${JSON.stringify({ 
+            type: 'error', 
+            error: `Tool operation failed: ${error.message}` 
+          })}\n\n`);
+        }
+      });
+
+      stream.on('end', async (data) => {
+        res.write(`data: ${JSON.stringify({ 
+          type: 'end', 
+          fullResponse,
+          usage: data.usage,
+          duration: data.duration
+        })}\n\n`);
+        res.end();
+      });
+
+      stream.on('error', (error) => {
+        logger.error('Project generation streaming error:', error);
+        res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+        res.end();
+      });
+
+    } else {
+      // Handle regular response with tool use support
+      const response = await AnthropicService.createMessage(requestData);
+      
+      // Process tool uses if present
+      let processedResponse = response;
+      
+      if (response.content && Array.isArray(response.content)) {
+        for (const block of response.content) {
+          if (block.type === 'tool_use' && block.name === 'str_replace_based_edit_tool') {
+            try {
+              // Delegate text editor operations to client
+              const toolResult = await delegateTextEditorToClient(sessionId, block.input);
+              
+              // Continue conversation with tool result
+              const toolResponse = await AnthropicService.createMessage({
+                ...requestData,
+                messages: [
+                  ...requestData.messages,
+                  {
+                    role: 'assistant',
+                    content: response.content
+                  },
+                  {
+                    role: 'user',
+                    content: [
+                      {
+                        type: 'tool_result',
+                        tool_use_id: block.id,
+                        content: JSON.stringify(toolResult)
+                      }
+                    ]
+                  }
+                ]
+              });
+              
+              processedResponse = toolResponse;
+            } catch (error) {
+              logger.error('Tool delegation error in project generation:', error);
+              // Continue with original response if tool delegation fails
+            }
+          }
+        }
+      }
+
+      // Extract response text
+      const responseText = processedResponse.content
+        .filter(block => block.type === 'text')
+        .map(block => block.text)
+        .join('\n');
+
+      res.json({
+        success: true,
+        response: responseText,
+        projectName,
+        description,
+        usage: processedResponse.usage,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+  } catch (error) {
+    logger.error('Yocto project generation error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Project generation failed',
+      message: error.message
+    });
+  }
+});
+
 // Get available models and their capabilities
 router.get('/models', (req, res) => {
   const models = AnthropicService.getAvailableModels();
