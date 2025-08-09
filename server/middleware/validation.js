@@ -78,13 +78,19 @@ const validateChatRequest = (req, res, next) => {
   }
 
   // Model validation
-  const validModels = ['claude-sonnet-4-20250514', 'claude-opus-4-20250514'];
-  if (model && !validModels.includes(model)) {
-    return res.status(400).json({
-      success: false,
-      error: 'Validation Error',
-      message: `Invalid model. Must be one of: ${validModels.join(', ')}`
-    });
+  if (model) {
+    const m = String(model).toLowerCase();
+    const allowed =
+      m.startsWith('claude-') ||
+      m.startsWith('gpt-4') ||
+      m.startsWith('gpt-5');
+    if (!allowed) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation Error',
+        message: 'Invalid model. Must start with "claude-", "gpt-4", or "gpt-5".'
+      });
+    }
   }
 
   // Temperature validation

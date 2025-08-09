@@ -256,13 +256,52 @@ Available capabilities:
 When asked to perform file operations, provide detailed step-by-step instructions.
 For complex problems, use <thinking> tags to show your reasoning process if extended thinking is enabled.`;
 
-    // Ensure tools include text editor
+    // Check if this is an OpenAI model
+    const isOpenAI = /^gpt-(4|5)/i.test(String(model));
+
+    // Define file tools for OpenAI function calling
+    const fileToolsForOpenAI = [
+      { type: 'function', function: {
+          name: 'fs_view', description: 'Read file or list directory',
+          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }
+      }},
+      { type: 'function', function: {
+          name: 'fs_create', description: 'Create/overwrite a file with content (<=1MB).',
+          parameters: { type: 'object',
+            properties: { path: { type: 'string' }, content: { type: 'string' } },
+            required: ['path', 'content']
+      }}},
+      { type: 'function', function: {
+          name: 'fs_update', description: 'Find & replace text in a file.',
+          parameters: { type: 'object',
+            properties: { path: { type: 'string' }, find: { type: 'string' }, replace: { type: 'string' } },
+            required: ['path', 'find', 'replace']
+      }}},
+      { type: 'function', function: {
+          name: 'fs_insert', description: 'Insert content at a 1-based line number.',
+          parameters: { type: 'object',
+            properties: { path: { type: 'string' }, line: { type: 'integer', minimum: 1 }, content: { type: 'string' } },
+            required: ['path', 'line', 'content']
+      }}},
+      { type: 'function', function: {
+          name: 'fs_delete', description: 'Delete a file. Use only with user confirmation.',
+          parameters: { type: 'object',
+            properties: { path: { type: 'string' }, confirm: { type: 'boolean' } },
+            required: ['path', 'confirm']
+      }}}
+    ];
+
+    // Build tools for this request
     const requestTools = [...tools];
-    if (!requestTools.some(tool => tool.name === 'str_replace_based_edit_tool')) {
-      requestTools.push({
-        type: 'text_editor_20250728',
-        name: 'str_replace_based_edit_tool'
-      });
+
+    if (isOpenAI) {
+      // Use function-calling tools
+      fileToolsForOpenAI.forEach(t => requestTools.push(t));
+    } else {
+      // Anthropic text editor tool
+      if (!requestTools.some(t => t.name === 'str_replace_based_edit_tool')) {
+        requestTools.push({ type: 'text_editor_20250728', name: 'str_replace_based_edit_tool' });
+      }
     }
 
     const requestData = {
@@ -367,8 +406,78 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
         res.end();
       });
 
+    } else if (isOpenAI) {
+      providerResp = await OpenAIService.createMessage({
+        model, max_tokens: maxTokens, temperature, system: systemPrompt,
+        messages: [
+          ...context.map(m => ({ role: m.role, content: m.content })),
+          { role: 'user', content: message }
+        ],
+        tools: requestTools,
+        tool_choice: 'auto'
+      });
+
+      // If the model requested tool calls, execute and continue once
+      const toolUses = (providerResp.tool_calls || []).map(tc => ({
+        id: tc.id,
+        name: tc.function?.name,
+        input: (() => { try { return JSON.parse(tc.function?.arguments || '{}') } catch { return {} } })()
+      }));
+
+      let responseText = '';
+      if (toolUses.length === 0) {
+        responseText = (providerResp.content || [])
+          .filter(b => b.type === 'text').map(b => b.text).join('\n');
+      } else {
+        // Execute tool(s) locally then send follow-up message
+        const sessionId = req.headers['x-session-id'] || `fallback_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+        const toolResults = [];
+        for (const tu of toolUses) {
+          const result = await handleOpenAIToolUse(tu, sessionId);
+          toolResults.push({ tu, result });
+        }
+
+        // Continue conversation: assistant tool calls + user tool results
+        const followUp = await OpenAIService.createMessage({
+          model, max_tokens: maxTokens, temperature, system: systemPrompt,
+          messages: [
+            ...context.map(m => ({ role: m.role, content: m.content })),
+            { role: 'user', content: message },
+            // mimic assistant content block with tool_use(s)
+            { role: 'assistant', content: providerResp.content },
+            // return tool results as a normal user message the model can read
+            { role: 'user', content: toolResults.map(({ tu, result }) =>
+                `Tool ${tu.name}(${JSON.stringify(tu.input)}): ${JSON.stringify(result)}`
+              ).join('\n') }
+          ]
+        });
+
+        responseText = (followUp.content || [])
+          .filter(b => b.type === 'text').map(b => b.text).join('\n');
+
+        providerResp = followUp;
+      }
+
+      // cache & respond (mirrors your Claude path)
+      if (useCache && responseText) {
+        const cacheKey = CacheService.generateKey('chat', { message, context, model, useYoctoPrompt });
+        await CacheService.set(cacheKey, responseText, 3600);
+      }
+
+      return res.json({
+        success: true,
+        response: responseText,
+        usage: providerResp.usage,
+        model: providerResp.model,
+        toolUses: toolUses || [],
+        citations: [],
+        useYoctoPrompt,
+        timestamp: new Date().toISOString()
+      });
+
     } else {
-      // Handle regular response with tool use support
+      // Handle regular Anthropic response with tool use support
       const response = await AnthropicService.createMessage(requestData);
       
       // Process tool uses if present
@@ -935,19 +1044,29 @@ Create a complete, production-ready Yocto project structure that includes all ne
 
 // Get available models and their capabilities
 router.get('/models', (req, res) => {
-  const models = AnthropicService.getAvailableModels();
-  const modelInfo = models.map(modelName => ({
+  const anthropicModels = AnthropicService.getAvailableModels();
+  const anthropicModelInfo = anthropicModels.map(modelName => ({
     name: modelName,
+    provider: 'anthropic',
     ...AnthropicService.getModelInfo(modelName)
+  }));
+
+  const openaiModels = OpenAIService.getAvailableModels();
+  const openaiModelInfo = openaiModels.map(modelName => ({
+    name: modelName,
+    provider: 'openai',
+    ...OpenAIService.getModelInfo(modelName)
   }));
 
   res.json({
     success: true,
-    models: modelInfo,
+    models: [...anthropicModelInfo, ...openaiModelInfo],
     recommended: {
       yocto: 'claude-sonnet-4-20250514',
       complex: 'claude-opus-4-20250514',
-      general: 'claude-sonnet-4-20250514'
+      general: 'claude-sonnet-4-20250514',
+      fast: 'gpt-5-nano',
+      coding: 'gpt-5'
     },
     timestamp: new Date().toISOString()
   });

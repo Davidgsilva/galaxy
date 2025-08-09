@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const AnthropicService = require('../services/anthropic');
+const OpenAIService = require('../services/openai');
 const CacheService = require('../services/cache');
 const { validateBatchRequest } = require('../middleware/validation');
 const winston = require('winston');
@@ -249,22 +250,55 @@ async function executeChatOperation(operation) {
     tools = []
   } = operation;
 
-  const response = await AnthropicService.createMessage({
-    model,
-    max_tokens: maxTokens,
-    temperature,
-    system: 'You are a helpful AI assistant executing a batch operation.',
-    messages: [
-      ...context,
-      { role: 'user', content: message }
-    ]
-  });
+  // Check if this is an OpenAI model
+  const isOpenAI = /^gpt-(4|5)/i.test(String(model));
 
-  return {
-    response: response.content[0].text,
-    usage: response.usage,
-    model: response.model
-  };
+  let response;
+  if (isOpenAI) {
+    response = await OpenAIService.createMessage({
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system: 'You are a helpful AI assistant executing a batch operation.',
+      messages: [
+        ...context,
+        { role: 'user', content: message }
+      ],
+      tools: tools.length > 0 ? tools : undefined,
+      tool_choice: tools.length > 0 ? 'auto' : undefined
+    });
+
+    // Extract text response for OpenAI
+    const responseText = (response.content || [])
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('\n') || 'No response text';
+
+    return {
+      response: responseText,
+      usage: response.usage,
+      model: response.model,
+      tool_calls: response.tool_calls
+    };
+  } else {
+    response = await AnthropicService.createMessage({
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system: 'You are a helpful AI assistant executing a batch operation.',
+      messages: [
+        ...context,
+        { role: 'user', content: message }
+      ],
+      tools: tools.length > 0 ? tools : undefined
+    });
+
+    return {
+      response: response.content[0].text,
+      usage: response.usage,
+      model: response.model
+    };
+  }
 }
 
 
