@@ -24,37 +24,55 @@ class OpenAIService {
         name: 'gpt-5',
         maxTokens: 16384,
         contextWindow: 256000,
-        costPer1kTokens: { input: 1.25, output: 10.0 }
+        costPer1kTokens: { input: 1.25, output: 10.0 },
+        tokenParam: 'max_completion_tokens',
+        supportsTemperature: false,
+        supportsStreaming: false
       },
       'gpt-5-mini': {
         name: 'gpt-5-mini',
         maxTokens: 16384,
         contextWindow: 256000,
-        costPer1kTokens: { input: 0.25, output: 2.0 }
+        costPer1kTokens: { input: 0.25, output: 2.0 },
+        tokenParam: 'max_completion_tokens',
+        supportsTemperature: false,
+        supportsStreaming: false
       },
       'gpt-5-nano': {
         name: 'gpt-5-nano',
         maxTokens: 8192,
         contextWindow: 128000,
-        costPer1kTokens: { input: 0.05, output: 0.40 }
+        costPer1kTokens: { input: 0.05, output: 0.40 },
+        tokenParam: 'max_completion_tokens',
+        supportsTemperature: false,
+        supportsStreaming: false
       },
       'gpt-4o': {
         name: 'gpt-4o',
         maxTokens: 4096,
         contextWindow: 128000,
-        costPer1kTokens: { input: 0.0025, output: 0.01 }
+        costPer1kTokens: { input: 0.0025, output: 0.01 },
+        tokenParam: 'max_tokens',
+        supportsTemperature: true,
+        supportsStreaming: true
       },
       'gpt-4o-mini': {
         name: 'gpt-4o-mini',
         maxTokens: 16384,
         contextWindow: 128000,
-        costPer1kTokens: { input: 0.00015, output: 0.0006 }
+        costPer1kTokens: { input: 0.00015, output: 0.0006 },
+        tokenParam: 'max_tokens',
+        supportsTemperature: true,
+        supportsStreaming: true
       },
       'gpt-4-turbo': {
         name: 'gpt-4-turbo',
         maxTokens: 4096,
         contextWindow: 128000,
-        costPer1kTokens: { input: 0.01, output: 0.03 }
+        costPer1kTokens: { input: 0.01, output: 0.03 },
+        tokenParam: 'max_tokens',
+        supportsTemperature: true,
+        supportsStreaming: true
       }
     };
   }
@@ -90,10 +108,18 @@ class OpenAIService {
 
       const apiRequest = {
         model: requestData.model,
-        messages: messages,
-        max_tokens: requestData.max_tokens,
-        temperature: requestData.temperature || 0.1
+        messages: messages
       };
+
+      // Use correct token limit parameter depending on model config
+      const tokenParamKeyMsg = modelConfig.tokenParam || (String(requestData.model || '').startsWith('gpt-5') ? 'max_completion_tokens' : 'max_tokens');
+      apiRequest[tokenParamKeyMsg] = requestData.max_tokens;
+
+      // Only include temperature for models that support it (exclude gpt-5*)
+      const isGpt5Msg = String(requestData.model || '').startsWith('gpt-5');
+      if (!isGpt5Msg && requestData.temperature != null) {
+        apiRequest.temperature = requestData.temperature;
+      }
 
       // Add tools if provided (map from Anthropic format to OpenAI function calling)
       if (requestData.tools && requestData.tools.length > 0) {
@@ -163,16 +189,37 @@ class OpenAIService {
         messageCount: requestData.messages?.length || 0
       });
 
+      // Validate model
+      if (!this.models[requestData.model]) {
+        throw new Error(`Unsupported model: ${requestData.model}`);
+      }
+      const modelConfig = this.models[requestData.model];
+
+      // Ensure max_tokens doesn't exceed model limits
+      requestData.max_tokens = Math.min(
+        requestData.max_tokens || modelConfig.maxTokens,
+        modelConfig.maxTokens
+      );
+
       // Map messages format from Anthropic to OpenAI
       const messages = this.mapMessagesToOpenAI(requestData.messages, requestData.system);
 
       const apiRequest = {
         model: requestData.model,
-        messages: messages,
-        max_tokens: requestData.max_tokens,
-        temperature: requestData.temperature || 0.1,
-        stream: true
+        messages: messages
       };
+
+      // Use correct token limit parameter depending on model family
+      const tokenParamKeyStream = modelConfig.tokenParam || (String(requestData.model || '').startsWith('gpt-5')
+        ? 'max_completion_tokens'
+        : 'max_tokens');
+      apiRequest[tokenParamKeyStream] = requestData.max_tokens;
+
+      // Only include temperature for models that support it (exclude gpt-5*)
+      const isGpt5Stream = String(requestData.model || '').startsWith('gpt-5');
+      if (!isGpt5Stream && requestData.temperature != null) {
+        apiRequest.temperature = requestData.temperature;
+      }
 
       // Add tools if provided
       if (requestData.tools && requestData.tools.length > 0) {
@@ -182,10 +229,52 @@ class OpenAIService {
         }
       }
 
-      const stream = await this.client.chat.completions.create(apiRequest);
-
-      // Create a custom event emitter to handle streaming
+      // Create a custom event emitter to handle streaming or fallback
       const streamEmitter = new EventEmitter();
+
+      const cfg = this.models[requestData.model];
+
+      // If model doesn't support streaming, fall back to single non-streaming call,
+      // but emit events in the same shape as streaming.
+      if (cfg && cfg.supportsStreaming === false) {
+        // Perform the non-streaming call asynchronously and return the emitter immediately
+        (async () => {
+          try {
+            const resp = await this.client.chat.completions.create(apiRequest);
+            const msg = resp.choices?.[0]?.message || {};
+            const text = msg.content || '';
+            const toolCallsRaw = msg.tool_calls || [];
+            const toolCalls = Array.isArray(toolCallsRaw)
+              ? toolCallsRaw.map(tc => ({
+                  id: tc.id,
+                  name: tc.function?.name,
+                  arguments: tc.function?.arguments
+                }))
+              : [];
+            const duration = Date.now() - startTime;
+
+            if (text) {
+              streamEmitter.emit('text', text);
+            }
+            streamEmitter.emit('end', {
+              fullText: text,
+              usage: {
+                input_tokens: resp.usage?.prompt_tokens || 0,
+                output_tokens: resp.usage?.completion_tokens || 0
+              },
+              duration,
+              tool_calls: toolCalls
+            });
+          } catch (err) {
+            logger.error('Non-streaming fallback error:', err);
+            streamEmitter.emit('error', err);
+          }
+        })();
+        return streamEmitter;
+      }
+
+      // Otherwise, stream as usual
+      const stream = await this.client.chat.completions.create({ ...apiRequest, stream: true });
 
       let fullText = '';
       let inputTokens = 0;
@@ -304,6 +393,25 @@ class OpenAIService {
     // Map user/assistant messages
     if (messages) {
       for (const message of messages) {
+        // Pass through tool messages and assistant tool_calls when present
+        if (message.role === 'tool') {
+          openAIMessages.push({
+            role: 'tool',
+            content: message.content,
+            tool_call_id: message.tool_call_id
+          });
+          continue;
+        }
+
+        if (message.role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+          openAIMessages.push({
+            role: 'assistant',
+            content: message.content || null,
+            tool_calls: message.tool_calls
+          });
+          continue;
+        }
+
         openAIMessages.push({
           role: message.role,
           content: message.content

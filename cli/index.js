@@ -107,9 +107,28 @@ class BeaconYoctoCLI {
     this.apiClient = new ApiClient();
     
     // Register for file operations immediately
-    this.apiClient.registerForFileOperations();
+    this.apiClient.registerForFileOperations().catch(err => {
+      console.error('Failed to register for file operations:', err.message);
+    });
+
+    // Handle graceful shutdown
+    this.setupShutdownHandlers();
     
     this.setupCommands();
+  }
+
+  setupShutdownHandlers() {
+    process.on('SIGINT', () => {
+      console.log(chalk.yellow('\\n🛑 Shutting down gracefully...'));
+      this.apiClient.disconnect();
+      process.exit(0);
+    });
+
+    process.on('SIGTERM', () => {
+      console.log(chalk.yellow('\\n🛑 Received SIGTERM, shutting down...'));
+      this.apiClient.disconnect();
+      process.exit(0);
+    });
   }
 
   setupCommands() {
@@ -129,7 +148,7 @@ class BeaconYoctoCLI {
       .argument('[message]', 'message to send to Yocto AI assistant')
       .option('-s, --streaming', 'enable streaming responses', true)
       .option('-t, --thinking', 'enable extended thinking mode', false)
-      .option('-m, --model <model>', 'AI model to use', 'claude-sonnet-4-20250514')
+      .option('-m, --model <model>', 'AI model to use', process.env.DEFAULT_MODEL || 'gpt-4o-mini')
       .option('--temperature <temp>', 'temperature for AI responses', '0.1')
       .action(async (message, options) => {
         if (!message) {
@@ -194,6 +213,8 @@ User Request: ${message}`;
         useYoctoPrompt: true,
         tools: []
       };
+
+      console.log(chalk.cyan(`🔍 CLI Debug: Sending to server with model=${options.model}`));
 
       if (options.streaming) {
         spinner.stop();
@@ -336,7 +357,7 @@ User Request: ${message}`;
     console.log('\nOptions:');
     console.log('  -s, --streaming                     # Enable streaming responses (default: true)');
     console.log('  -t, --thinking                      # Enable extended thinking mode (default: true)');
-    console.log('  -m, --model <model>                 # AI model to use');
+    console.log('  -m, --model <model>                 # AI model (e.g. claude-sonnet-4-20250514, gpt-5)');
     console.log('  --temperature <temp>                # Temperature for AI responses');
     console.log('  --proxy-url <url>                   # Proxy server URL');
     console.log('  -v, --verbose                       # Enable verbose logging');
@@ -772,82 +793,6 @@ User Request: ${message}`;
     }
   }
 
-  buildProjectGenerationPrompt(config) {
-    return `I need you to create a complete Yocto Project for embedded Linux development. This is like "Lovable for Yocto" - I want to provide real-time feedback to the user about what you're doing, similar to how Claude Code shows progress.
-
-PROJECT DETAILS:
-- Name: ${config.projectName}
-- Description: ${config.description}
-- Yocto Release: Latest stable (default branch)
-
-IMPORTANT - PROVIDE PROGRESS FEEDBACK:
-As you work, clearly describe what you're doing at each step. Use phrases like:
-- "Creating project directory structure..."
-- "Writing setup script for cloning Yocto repositories..."
-- "Writing local.conf with target hardware configuration..."
-- "Generating BSP layer for hardware..."
-- "Creating build scripts..."
-- "Writing documentation and setup guides..."
-
-TASK: Create a complete Yocto project structure including:
-
-1. **Project Directory Setup**:
-   - Create project directory: ${config.projectName}
-   - Create standard Yocto directory structure (sources/, build/, downloads/, sstate-cache/)
-   - Generate .gitignore for Yocto projects
-
-2. **Repository Setup Scripts**:
-   - Create setup-yocto.sh script that clones the necessary repositories:
-     * git clone git://git.yoctoproject.org/poky.git sources/poky (latest stable)
-     * git clone git://git.openembedded.org/meta-openembedded sources/meta-openembedded (latest stable)
-     * Hardware-specific layers based on the target machine
-   - Create environment setup script (setup-environment.sh)
-   - Make scripts executable and well-documented
-
-3. **Configuration Templates**:
-   - local.conf template with hardware-specific settings based on project description
-   - bblayers.conf template with required layers for the hardware
-   - site.conf for build optimizations (parallel make, sstate, downloads cache)
-   - auto-setup.sh to initialize build environment
-
-4. **Hardware-Specific Research & Setup**:
-   - Use web_search to find latest BSP information based on project description
-   - Research required layers and dependencies
-   - Create machine-specific configuration notes
-   - Add hardware setup instructions
-
-5. **Build Scripts & Automation**:
-   - build.sh script for common build commands
-   - clean.sh for cleaning builds
-   - flash.sh script with hardware-specific flashing instructions
-   - Environment validation script
-
-6. **Documentation & Guides**:
-   - README.md with complete setup and build instructions
-   - HARDWARE.md with target hardware specific notes
-   - BUILD.md with build options and troubleshooting
-   - Include all git clone commands and setup steps
-
-7. **Research Current Best Practices**:
-   - Use web_search to find latest ${config.release.value} documentation
-   - Look up target hardware BSP layers and setup guides
-   - Find community examples and best practices
-
-CRITICAL INSTRUCTIONS:
-- Use the text_editor tool to create ALL files and scripts
-- Use web_search to research current Yocto practices and BSP information
-- Create scripts that users can run to automatically clone Yocto repositories
-- Include specific git clone commands in your scripts:
-  * git clone git://git.yoctoproject.org/poky.git (latest stable branch)
-  * git clone git://git.openembedded.org/meta-openembedded (latest stable branch)
-  * Add hardware-specific layer repositories
-- Make everything executable and well-documented
-- Provide running commentary on what you're creating
-- Include validation steps and error handling in scripts
-- Optimize for target hardware based on project description
-
-Create a complete, production-ready Yocto project structure that includes all necessary scripts for users to clone repositories and start building immediately. Focus on creating setup scripts rather than trying to clone repositories directly.`;
-  }
 
   async createProjectFilesLocally(config, aiResponse) {
     const fs = require('fs').promises;
@@ -1310,6 +1255,8 @@ bblayers.conf
 
     console.log('Capabilities');
     console.log('Building with extended thinking');
+    const activeModel = (options && options.model) || process.env.DEFAULT_MODEL || 'gpt-4o-mini';
+    console.log(chalk.gray(`Model: ${activeModel}  (override with -m <model> or DEFAULT_MODEL env)`));
     console.log();
 
     const context = [];
@@ -1359,7 +1306,7 @@ User Request: ${message}`;
           message: contextualMessage,
           context: context.slice(0, -1),
           useYoctoPrompt: true,
-          model: options.model || 'claude-sonnet-4-20250514',
+          model: options.model || process.env.DEFAULT_MODEL || 'gpt-4o-mini',
           temperature: options.thinking === true ? 1 : 0.1, // Must be 1 when thinking is enabled
           maxTokens: 16000,
           streaming: options.streaming !== false,

@@ -11,6 +11,7 @@ const chatRoutes = require('./routes/chat');
 const fileRoutes = require('./routes/files');
 const batchRoutes = require('./routes/batch');
 const cacheRoutes = require('./routes/cache');
+const WebSocketFileOperationHandler = require('./websocket-handler');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -161,5 +162,17 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 Beacon proxy server started on http://localhost:${PORT}`);
   console.log(`📊 Health check available at http://localhost:${PORT}/health`);
 });
+
+// Initialize WebSocket handler for file operations
+const wsHandler = new WebSocketFileOperationHandler();
+wsHandler.initialize(server);
+
+// Make WebSocket handler available globally for routes
+global.wsFileHandler = wsHandler;
+
+// Cleanup inactive connections every minute
+setInterval(() => {
+  wsHandler.cleanup();
+}, 60000);
 
 module.exports = app;

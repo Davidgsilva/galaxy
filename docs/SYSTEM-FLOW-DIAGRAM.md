@@ -34,24 +34,31 @@ graph TB
 
 ## Detailed Connection Flow
 
-### 1. CLI Startup & Registration
+### 1. CLI Startup & WebSocket Registration
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant CLI as Beacon CLI
     participant API as ApiClient
+    participant WSC as WebSocket Client
     participant PS as Proxy Server
-    participant LFS as LocalFileService
+    participant WSH as WebSocket Handler
     
     U->>CLI: beacon "create yocto project"
     CLI->>API: new ApiClient()
     API->>API: Generate sessionId
-    API->>API: registerForFileOperations()
-    Note over API: Sets global.fileOperationClient
+    API->>WSC: new WebSocketFileClient(serverUrl, sessionId)
+    API->>WSC: connect()
+    WSC->>PS: WebSocket connection request
+    PS->>WSH: Accept WebSocket connection
+    WSH->>WSC: Connection established
+    WSC->>WSH: Send registration message
+    WSH->>WSH: Store client connection mapping
+    WSH->>WSC: Registration success
+    WSC->>API: Connection & registration confirmed
     CLI->>PS: Health check (/health)
     PS->>CLI: Server status OK
-    CLI->>API: setProxyUrl(http://localhost:3001)
 ```
 
 ### 2. Chat Request Processing
@@ -126,45 +133,54 @@ sequenceDiagram
     API->>CLI: Complete stream processing
 ```
 
-### 4. File Operation Delegation
+### 4. WebSocket-Based File Operation Delegation
 
 ```mermaid
 sequenceDiagram
     participant Claude as Claude API
     participant PS as Proxy Server
-    participant API as ApiClient (global)
+    participant WSH as WebSocket Handler
+    participant WS as WebSocket Connection
+    participant CLI as CLI WebSocket Client
     participant LFS as LocalFileService
     participant FS as File System
     
-    Note over Claude: AI decides to use text_editor tool
-    Claude->>PS: Tool use: str_replace_based_edit_tool
-    PS->>PS: delegateTextEditorToClient()
-    PS->>API: handleTextEditorOperation(operation, args)
+    Note over Claude: AI decides to use file operation tool
+    Claude->>PS: Tool use: fs_view/fs_create/fs_update
+    PS->>WSH: delegateFileOperation(sessionId, operation, params)
+    WSH->>WSH: Check client connection
+    WSH->>WS: Send operation request with operationId
+    WS->>CLI: WebSocket message: file_operation
     
+    CLI->>CLI: handleFileOperation(data)
     alt View operation
-        API->>LFS: readFile(path)
+        CLI->>LFS: readFile(path)
         LFS->>FS: Read file content
         FS->>LFS: File content
-        LFS->>API: File data
+        LFS->>CLI: File data
     else Create operation
-        API->>LFS: createFile(path, content)
+        CLI->>LFS: createFile(path, content)
         LFS->>FS: Write new file
         FS->>LFS: Success confirmation
-        LFS->>API: Creation result
+        LFS->>CLI: Creation result
     else String replace operation
-        API->>LFS: readFile(path)
-        LFS->>FS: Current content
-        API->>API: Perform string replacement
-        API->>LFS: updateFile(path, newContent)
-        LFS->>FS: Write updated content
+        CLI->>LFS: stringReplace(path, oldStr, newStr)
+        LFS->>FS: Read, replace, write
         FS->>LFS: Update confirmation
-        LFS->>API: Update result
+        LFS->>CLI: Replace result
+    else Insert operation
+        CLI->>LFS: insertAtLine(path, text, line)
+        LFS->>FS: Insert text at line
+        FS->>LFS: Insert confirmation
+        LFS->>CLI: Insert result
     end
     
-    API->>PS: Tool operation result
+    CLI->>WS: Send operation_result with operationId
+    WS->>WSH: Receive result
+    WSH->>PS: Return operation result
     PS->>Claude: Continue with tool result
     Claude->>PS: Final AI response
-    PS->>API: Complete response
+    PS->>CLI: Complete response via HTTP
 ```
 
 ### 5. Yocto Project Creation Flow

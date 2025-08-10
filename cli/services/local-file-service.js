@@ -395,6 +395,64 @@ class LocalFileService {
       throw new Error(`Get file stats failed: ${error.message}`);
     }
   }
+
+  // String replace operation for WebSocket file operations
+  async stringReplace(filePath, oldStr, newStr) {
+    try {
+      const resolvedPath = this.resolvePath(filePath);
+      this.validatePath(resolvedPath);
+      
+      const content = await fs.readFile(resolvedPath, 'utf8');
+      
+      if (!content.includes(oldStr)) {
+        throw new Error(`String "${oldStr}" not found in file ${filePath}`);
+      }
+      
+      const newContent = content.replace(oldStr, newStr);
+      await fs.writeFile(resolvedPath, newContent, 'utf8');
+      
+      const oldLines = content.split('\n').length;
+      const newLines = newContent.split('\n').length;
+      
+      return {
+        linesChanged: newLines - oldLines,
+        charactersChanged: newContent.length - content.length,
+        replacements: 1
+      };
+    } catch (error) {
+      logger.error(`Error replacing string in ${filePath}:`, error);
+      throw new Error(`String replace failed: ${error.message}`);
+    }
+  }
+
+  // Insert text at specific line
+  async insertAtLine(filePath, newStr, lineNumber) {
+    try {
+      const resolvedPath = this.resolvePath(filePath);
+      this.validatePath(resolvedPath);
+      
+      const content = await fs.readFile(resolvedPath, 'utf8');
+      const lines = content.split('\n');
+      
+      if (lineNumber < 0 || lineNumber > lines.length) {
+        throw new Error(`Invalid line number ${lineNumber}. File has ${lines.length} lines.`);
+      }
+      
+      lines.splice(lineNumber, 0, newStr);
+      const newContent = lines.join('\n');
+      
+      await fs.writeFile(resolvedPath, newContent, 'utf8');
+      
+      return {
+        linesAdded: 1,
+        charactersAdded: newStr.length + 1, // +1 for newline
+        insertedAt: lineNumber
+      };
+    } catch (error) {
+      logger.error(`Error inserting at line ${lineNumber} in ${filePath}:`, error);
+      throw new Error(`Insert at line failed: ${error.message}`);
+    }
+  }
 }
 
 module.exports = LocalFileService;

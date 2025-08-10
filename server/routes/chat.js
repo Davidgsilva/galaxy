@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const AnthropicService = require('../services/anthropic');
+const OpenAIService = require('../services/openai');
 const CacheService = require('../services/cache');
 const { validateChatRequest } = require('../middleware/validation');
 const winston = require('winston');
+
+// Import client connections registry from files route
+const { clientConnections } = require('./files');
 
 const logger = winston.createLogger({
   level: 'info',
@@ -155,8 +159,9 @@ async function delegateTextEditorToClient(sessionId, toolInput) {
     throw new Error('Session ID required for text editor operations');
   }
 
-  // Check if client is registered globally
-  if (!global.fileOperationClient) {
+  // Check if client is registered
+  const clientInfo = clientConnections.get(sessionId);
+  if (!clientInfo) {
     throw new Error('No file operation client registered. Make sure the client is running and has called registerForFileOperations().');
   }
 
@@ -167,14 +172,110 @@ async function delegateTextEditorToClient(sessionId, toolInput) {
       path: toolInput.path 
     });
 
-    // Call the client's handleTextEditorOperation method directly
-    const result = await global.fileOperationClient.handleTextEditorOperation(toolInput.command, toolInput);
+    // Delegate to WebSocket client
+    const result = await global.wsFileHandler.delegateFileOperation(sessionId, toolInput.command, toolInput);
 
     return result;
     
   } catch (error) {
     logger.error('Client delegation failed:', error);
     throw new Error(`File operation failed: ${error.message}`);
+  }
+}
+
+async function handleOpenAIToolUse(toolUse, sessionId) {
+  if (!sessionId) {
+    throw new Error('Session ID required for OpenAI tool operations');
+  }
+
+  // Check if WebSocket client is connected
+  if (!global.wsFileHandler) {
+    throw new Error('WebSocket file handler not initialized');
+  }
+
+  const clientStatus = global.wsFileHandler.getClientStatus(sessionId);
+  logger.info('Checking WebSocket client status', { 
+    sessionId, 
+    clientStatus,
+    allClients: global.wsFileHandler.getAllClients().length 
+  });
+  
+  if (!clientStatus.connected) {
+    throw new Error(`No file operation client connected for session ${sessionId}. Make sure the CLI is running and connected via WebSocket.`);
+  }
+
+  try {
+    logger.info('Handling OpenAI tool use', { 
+      sessionId, 
+      toolName: toolUse.name,
+      input: toolUse.input 
+    });
+
+    const { name, input } = toolUse;
+
+    // Map OpenAI function names to operations
+    switch (name) {
+      case 'list_dir':
+        if (input && input.dir != null && typeof input.dir !== 'string') {
+          throw new Error('list_dir.dir must be a string if provided');
+        }
+        return await global.wsFileHandler.delegateFileOperation(sessionId, 'view', {
+          path: (input && typeof input.dir === 'string' ? input.dir : '.')
+        });
+      
+      case 'fs_view':
+        if (!input || typeof input.path !== 'string' || input.path.trim() === '') {
+          throw new Error('fs_view.path is required and must be a non-empty string');
+        }
+        return await global.wsFileHandler.delegateFileOperation(sessionId, 'view', { path: input.path });
+      
+      case 'fs_create':
+        if (!input || typeof input.path !== 'string' || typeof input.content !== 'string') {
+          throw new Error('fs_create requires string path and string content');
+        }
+        return await global.wsFileHandler.delegateFileOperation(sessionId, 'create', {
+          path: input.path,
+          file_text: input.content
+        });
+      
+      case 'fs_update':
+        if (!input || typeof input.path !== 'string' || typeof input.find !== 'string' || typeof input.replace !== 'string') {
+          throw new Error('fs_update requires string path, string find, and string replace');
+        }
+        return await global.wsFileHandler.delegateFileOperation(sessionId, 'str_replace', {
+          path: input.path,
+          old_str: input.find,
+          new_str: input.replace
+        });
+      
+      case 'fs_insert':
+        if (!input || typeof input.path !== 'string' || typeof input.content !== 'string' || typeof input.line !== 'number' || input.line < 1) {
+          throw new Error('fs_insert requires string path, string content, and integer line >= 1');
+        }
+        return await global.wsFileHandler.delegateFileOperation(sessionId, 'insert', {
+          path: input.path,
+          new_str: input.content,
+          insert_line: input.line
+        });
+      
+      case 'fs_delete':
+        if (!input || typeof input.path !== 'string') {
+          throw new Error('fs_delete requires string path');
+        }
+        if (!input.confirm) {
+          throw new Error('Delete operation requires explicit confirmation');
+        }
+        // For now, we don't have a delete operation in handleTextEditorOperation
+        // This would need to be implemented in the client side
+        throw new Error('File deletion not implemented via text editor operations');
+      
+      default:
+        throw new Error(`Unknown OpenAI tool: ${name}`);
+    }
+    
+  } catch (error) {
+    logger.error('OpenAI tool use failed:', error);
+    throw new Error(`OpenAI tool operation failed: ${error.message}`);
   }
 }
 
@@ -207,7 +308,7 @@ router.post('/', validateChatRequest, async (req, res) => {
     const { 
       message, 
       context = [], 
-      model = 'claude-sonnet-4-20250514',
+      model = process.env.DEFAULT_MODEL || 'gpt-4o-mini',
       temperature = 0.1,
       maxTokens = 8192,
       streaming = false,
@@ -253,42 +354,127 @@ Available capabilities:
 - Web search for current information
 - Desktop automation when enabled
 
-When asked to perform file operations, provide detailed step-by-step instructions.
+Available tools for file operations:
+- **list_dir**: List files in a directory. When user asks to "list directory contents", call list_dir with { dir: "." }
+- **fs_view**: Read a file's contents 
+- **fs_create**, **fs_update**, **fs_insert**, **fs_delete**: For file modifications
+
+When the user asks to list the current directory, call list_dir with { dir: "." }.
+
 For complex problems, use <thinking> tags to show your reasoning process if extended thinking is enabled.`;
 
     // Check if this is an OpenAI model
-    const isOpenAI = /^gpt-(4|5)/i.test(String(model));
+    const isOpenAI = /^gpt-/i.test(String(model));
 
-    // Define file tools for OpenAI function calling
+    console.log("isOpenAI: " + isOpenAI);
+    console.log("openai_service_available: " + !!OpenAIService);
+    console.log("openai_api_key_set: " + !!process.env.OPENAI_API_KEY);
+    console.log("regex_test: " + `/^gpt-/i.test("${model}")`);
+    
+    logger.info('Server routing decision', {
+      model: model,
+      isOpenAI: isOpenAI,
+      regex_test: `/^gpt-/i.test("${model}")`,
+      openai_service_available: !!OpenAIService,
+      openai_api_key_set: !!process.env.OPENAI_API_KEY
+    });
+
+    // If OpenAI model but no API key, fail fast with clear error
+    if (isOpenAI && !process.env.OPENAI_API_KEY) {
+      return res.status(400).json({
+        success: false,
+        error: 'OpenAI API key not configured',
+        message: 'OPENAI_API_KEY environment variable is required for GPT models'
+      });
+    }
+
+    // Define file tools for OpenAI function calling (Anthropic-style schema; converted later)
     const fileToolsForOpenAI = [
-      { type: 'function', function: {
-          name: 'fs_view', description: 'Read file or list directory',
-          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }
-      }},
-      { type: 'function', function: {
-          name: 'fs_create', description: 'Create/overwrite a file with content (<=1MB).',
-          parameters: { type: 'object',
-            properties: { path: { type: 'string' }, content: { type: 'string' } },
-            required: ['path', 'content']
-      }}},
-      { type: 'function', function: {
-          name: 'fs_update', description: 'Find & replace text in a file.',
-          parameters: { type: 'object',
-            properties: { path: { type: 'string' }, find: { type: 'string' }, replace: { type: 'string' } },
-            required: ['path', 'find', 'replace']
-      }}},
-      { type: 'function', function: {
-          name: 'fs_insert', description: 'Insert content at a 1-based line number.',
-          parameters: { type: 'object',
-            properties: { path: { type: 'string' }, line: { type: 'integer', minimum: 1 }, content: { type: 'string' } },
-            required: ['path', 'line', 'content']
-      }}},
-      { type: 'function', function: {
-          name: 'fs_delete', description: 'Delete a file. Use only with user confirmation.',
-          parameters: { type: 'object',
-            properties: { path: { type: 'string' }, confirm: { type: 'boolean' } },
-            required: ['path', 'confirm']
-      }}}
+      {
+        name: 'list_dir',
+        description: 'List files and directories in a directory.',
+        input_schema: { 
+          type: 'object', 
+          properties: { 
+            dir: { 
+              type: 'string', 
+              description: 'Directory path to list. Use "." for current directory.', 
+              default: '.' 
+            } 
+          }, 
+          required: [],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'fs_view',
+        description: 'Read the contents of a file at an absolute or cwd-relative path.',
+        input_schema: { 
+          type: 'object', 
+          properties: { 
+            path: { 
+              type: 'string', 
+              description: 'File path to read. Absolute or relative to the CLI working dir.' 
+            } 
+          }, 
+          required: ['path'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'fs_create',
+        description: 'Create/overwrite a file with content (<=1MB).',
+        input_schema: { 
+          type: 'object', 
+          properties: { 
+            path: { type: 'string', description: 'File path to create' }, 
+            content: { type: 'string', description: 'File content' } 
+          }, 
+          required: ['path', 'content'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'fs_update',
+        description: 'Find & replace text in a file.',
+        input_schema: { 
+          type: 'object', 
+          properties: { 
+            path: { type: 'string', description: 'File path to update' }, 
+            find: { type: 'string', description: 'Text to find' }, 
+            replace: { type: 'string', description: 'Replacement text' } 
+          }, 
+          required: ['path', 'find', 'replace'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'fs_insert',
+        description: 'Insert content at a 1-based line number.',
+        input_schema: { 
+          type: 'object', 
+          properties: { 
+            path: { type: 'string', description: 'File path to modify' }, 
+            line: { type: 'integer', minimum: 1, description: '1-based line number' }, 
+            content: { type: 'string', description: 'Content to insert' } 
+          }, 
+          required: ['path', 'line', 'content'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'fs_delete',
+        description: 'Delete a file. Use only with user confirmation.',
+        input_schema: { 
+          type: 'object', 
+          properties: { 
+            path: { type: 'string', description: 'File path to delete' }, 
+            confirm: { type: 'boolean', description: 'Confirmation that deletion is intended' } 
+          }, 
+          required: ['path', 'confirm'],
+          additionalProperties: false
+        }
+      }
     ];
 
     // Build tools for this request
@@ -334,8 +520,128 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       };
     }
 
-    if (streaming) {
-      // Handle streaming response
+    if (streaming && isOpenAI) {
+      // Streaming via OpenAI with function-calling loop
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+
+      const sessionId = req.headers['x-session-id'] || `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const conversation = [
+        ...context.map(m => ({ role: m.role, content: m.content })),
+        { role: 'user', content: message }
+      ];
+
+      let fullResponse = '';
+
+      async function streamOnce(messages) {
+        const oaiStream = await OpenAIService.createStreamingMessage({
+          model,
+          max_tokens: maxTokens,
+          temperature,
+          system: systemPrompt,
+          messages,
+          tools: requestTools,
+          tool_choice: 'auto'
+        });
+
+        return new Promise((resolve, reject) => {
+          // We will rely on the tool_calls provided in the 'end' event to ensure IDs are present
+          let usageFromEnd = null;
+          let toolCallsFromEnd = [];
+
+          oaiStream.on('text', (text) => {
+            fullResponse += text;
+            res.write(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`);
+          });
+
+          oaiStream.on('end', async (data) => {
+            usageFromEnd = data.usage;
+            toolCallsFromEnd = Array.isArray(data.tool_calls) ? data.tool_calls : [];
+            resolve({ usage: usageFromEnd, pendingToolCalls: toolCallsFromEnd });
+          });
+
+          oaiStream.on('error', (error) => {
+            reject(error);
+          });
+        });
+      }
+
+      try {
+        // Loop until model stops producing tool calls
+        // 1) stream assistant output/tool_calls
+        // 2) if tool_calls exist: execute; append assistant tool_calls and tool results; continue
+        // 3) else: finish and send end event
+        while (true) {
+          const { usage, pendingToolCalls } = await streamOnce(conversation);
+
+          if (pendingToolCalls.length === 0) {
+            // No tool calls — finish
+            res.write(`data: ${JSON.stringify({ type: 'end', fullResponse, usage, duration: undefined })}\n\n`);
+            res.end();
+            if (useCache && fullResponse) {
+              const cacheKey = CacheService.generateKey('chat', { message, context, model, useYoctoPrompt });
+              await CacheService.set(cacheKey, fullResponse, 3600);
+            }
+            break;
+          }
+
+          // Append assistant tool_calls message (filter invalid, stringify args)
+          const assistantToolCalls = pendingToolCalls
+            .filter(tc => typeof tc.name === 'string' && tc.name.trim() !== '')
+            .map(tc => ({
+              id: tc.id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+              type: 'function',
+              function: {
+                name: tc.name.trim(),
+                arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments || {})
+              }
+            }));
+
+          if (assistantToolCalls.length === 0) {
+            // No valid tool calls—finish current turn gracefully
+            res.write(`data: ${JSON.stringify({ type: 'end', fullResponse, usage, duration: undefined })}\n\n`);
+            res.end();
+            if (useCache && fullResponse) {
+              const cacheKey = CacheService.generateKey('chat', { message, context, model, useYoctoPrompt });
+              await CacheService.set(cacheKey, fullResponse, 3600);
+            }
+            break;
+          }
+          conversation.push({ role: 'assistant', content: null, tool_calls: assistantToolCalls });
+
+          // Execute tools and append tool result messages
+          for (const tc of pendingToolCalls) {
+            try {
+              const input = (() => { try { return JSON.parse(tc.arguments || '{}') } catch { return {} } })();
+              const result = await handleOpenAIToolUse({ name: tc.name, input }, sessionId);
+              res.write(`data: ${JSON.stringify({ type: 'tool_result', toolName: tc.name, result })}\n\n`);
+
+              conversation.push({
+                role: 'tool',
+                content: typeof result === 'string' ? result : JSON.stringify(result),
+                tool_call_id: assistantToolCalls.find(c => c.function.name === tc.name)?.id || tc.id
+              });
+            } catch (error) {
+              logger.error('Tool use error in OpenAI streaming loop:', error);
+              res.write(`data: ${JSON.stringify({ type: 'error', error: `Tool operation failed: ${error.message}` })}\n\n`);
+              conversation.push({
+                role: 'tool',
+                content: JSON.stringify({ error: error.message }),
+                tool_call_id: assistantToolCalls.find(c => c.function.name === tc.name)?.id || tc.id
+              });
+            }
+          }
+          // loop continues with updated conversation
+        }
+      } catch (error) {
+        logger.error('OpenAI streaming error:', error);
+        res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+        res.end();
+      }
+    } else if (streaming) {
+      // Streaming via Anthropic
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
@@ -363,37 +669,20 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
               sessionId 
             });
             
-            // Delegate to client
             const toolResult = await delegateTextEditorToClient(sessionId, toolUse.input);
-            
-            // Send tool result back to stream
-            res.write(`data: ${JSON.stringify({ 
-              type: 'tool_result', 
-              toolId: toolUse.id,
-              result: toolResult 
-            })}\n\n`);
-            
+            res.write(`data: ${JSON.stringify({ type: 'tool_result', toolId: toolUse.id, result: toolResult })}\n\n`);
             logger.info('Tool operation completed', { toolId: toolUse.id, result: toolResult });
           }
         } catch (error) {
           logger.error('Tool use error in streaming:', error);
-          res.write(`data: ${JSON.stringify({ 
-            type: 'error', 
-            error: `Tool operation failed: ${error.message}` 
-          })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'error', error: `Tool operation failed: ${error.message}` })}\n\n`);
         }
       });
 
       stream.on('end', async (data) => {
-        res.write(`data: ${JSON.stringify({ 
-          type: 'end', 
-          fullResponse,
-          usage: data.usage,
-          duration: data.duration
-        })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'end', fullResponse, usage: data.usage, duration: data.duration })}\n\n`);
         res.end();
 
-        // Cache the complete response
         if (useCache && fullResponse) {
           const cacheKey = CacheService.generateKey('chat', { message, context, model, useYoctoPrompt });
           await CacheService.set(cacheKey, fullResponse, 3600); // Cache for 1 hour

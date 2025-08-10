@@ -11,6 +11,9 @@ const logger = winston.createLogger({
 // Store client connections for delegating file operations
 const clientConnections = new Map();
 
+// Export for use by other routes
+exports.clientConnections = clientConnections;
+
 // Register client connection for file operations
 router.post('/register-client', (req, res) => {
   const { sessionId, clientId } = req.body;

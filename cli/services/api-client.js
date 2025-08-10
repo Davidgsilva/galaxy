@@ -1,6 +1,7 @@
 const axios = require('axios');
 const chalk = require('chalk');
 const LocalFileService = require('./local-file-service');
+const WebSocketFileClient = require('./websocket-client');
 
 class ApiClient {
   constructor() {
@@ -10,11 +11,13 @@ class ApiClient {
     this.retryDelay = 1000; // 1 second
     this.localFileService = new LocalFileService();
     this.sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    this.wsClient = null;
   }
 
   setProxyUrl(url) {
     this.proxyUrl = url;
   }
+
 
   async makeRequest(endpoint, data, options = {}) {
     const config = {
@@ -239,7 +242,8 @@ class ApiClient {
         timeout: this.timeout,
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'text/event-stream'
+          'Accept': 'text/event-stream',
+          'x-session-id': this.sessionId
         }
       });
 
@@ -265,6 +269,25 @@ class ApiClient {
     } catch (error) {
       onError(error);
     }
+  }
+
+  async streamRequest(endpoint, data) {
+    const events = [];
+    return new Promise((resolve, reject) => {
+      this.createStreamingRequest(
+        endpoint,
+        data,
+        (evt) => {
+          try {
+            events.push(evt);
+          } catch (_) {
+            // ignore push errors
+          }
+        },
+        () => resolve({ success: true, events }),
+        (err) => reject(err)
+      );
+    });
   }
 
   async streamingChat(requestData, onData, onEnd, onError) {
@@ -375,6 +398,7 @@ class ApiClient {
 
     return stats;
   }
+
 
   // File operation delegation handler (used by server)
   async handleTextEditorOperation(operation, args) {
@@ -491,6 +515,7 @@ class ApiClient {
     }
   }
 
+
   // Yocto project generation with streaming support
   async generateYoctoProject(data) {
     try {
@@ -515,12 +540,37 @@ class ApiClient {
     }
   }
 
-  // Register this client instance globally for server access
-  registerForFileOperations() {
-    console.log(chalk.blue('📝 Registering client for file operations...'));
-    global.fileOperationClient = this;
-    console.log(chalk.green('✅ Client registered for file operations'));
-    return true;
+  // Register this client with the server for file operations via WebSocket
+  async registerForFileOperations() {
+    try {
+      console.log(chalk.blue('🔗 Initializing WebSocket connection for file operations...'));
+      
+      this.wsClient = new WebSocketFileClient(this.proxyUrl, this.sessionId);
+      await this.wsClient.connect();
+      
+      // Wait a moment for connection and registration
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const status = this.wsClient.getStatus();
+      if (status.connected && status.registered) {
+        console.log(chalk.green('✅ WebSocket file operations client ready'));
+        return true;
+      } else {
+        console.log(chalk.red('❌ WebSocket registration failed'));
+        return false;
+      }
+    } catch (error) {
+      console.log(chalk.red('❌ WebSocket setup failed:', error.message));
+      return false;
+    }
+  }
+
+  // Cleanup WebSocket connection
+  disconnect() {
+    if (this.wsClient) {
+      this.wsClient.disconnect();
+      this.wsClient = null;
+    }
   }
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "beacon",
   "version": "1.0.0",
-  "description": "AI-powered CLI tool for Yocto Project embedded development with silicon-specific intelligence",
+  "description": "AI-powered CLI tool for embedded development with silicon-specific intelligence",
   "main": "index.js",
   "scripts": {
     "start": "node server/index.js",
@@ -60,6 +60,7 @@
     "rate-limiter-flexible": "^5.0.3",
     "semver": "^7.6.0",
     "simple-git": "^3.19.1",
+    "websocket": "^1.0.35",
     "winston": "^3.13.0",
     "yaml": "^2.4.2"
   },
