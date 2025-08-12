@@ -3,65 +3,11 @@
 const { Command } = require('commander');
 const chalk = require('chalk');
 const ora = require('ora');
-const { 
-  input, 
-  select, 
-  checkbox, 
-  confirm, 
-  search, 
-  password, 
-  expand, 
-  editor, 
-  number, 
-  rawlist 
-} = require('@inquirer/prompts');
 
 const packageInfo = require('../package.json');
 const ApiClient = require('./services/api-client');
+const { createShell } = require('./ui/blessedShell');
 
-class PromptHelper {
-  static async input(message, options = {}) {
-    return await input({ message, ...options });
-  }
-
-  static async select(message, choices, options = {}) {
-    return await select({ message, choices, ...options });
-  }
-
-  static async multiSelect(message, choices, options = {}) {
-    return await checkbox({ message, choices, ...options });
-  }
-
-  static async confirm(message, options = {}) {
-    return await confirm({ message, ...options });
-  }
-
-  static async search(message, source, options = {}) {
-    return await search({ message, source, ...options });
-  }
-
-  static async password(message, options = {}) {
-    return await password({ message, ...options });
-  }
-
-  static async expand(message, choices, options = {}) {
-    return await expand({ message, choices, ...options });
-  }
-
-  static async editor(message, options = {}) {
-    return await editor({ message, ...options });
-  }
-
-  static async number(message, options = {}) {
-    return await number({ message, ...options });
-  }
-
-  static async rawList(message, choices, options = {}) {
-    return await rawlist({ message, choices, ...options });
-  }
-
-
-}
 
 class BeaconYoctoCLI {
   constructor() {
@@ -129,13 +75,6 @@ class BeaconYoctoCLI {
       });
 
 
-    // Prompt demo command
-    this.program
-      .command('demo-prompts')
-      .description('Demonstrate all available prompt types')
-      .action(async () => {
-        await this.demoPrompts();
-      });
   }
 
   async sendMessage(message, options) {
@@ -277,18 +216,43 @@ User Request: ${message}`;
     console.log();
   }
 
+  async getProjectStatusText() {
+    const projectContext = await this.getProjectContext();
+    
+    let status = `{blue-fg}📊 Project Status{/blue-fg}\n${'─'.repeat(50)}\n`;
+    status += `Working Directory: {yellow-fg}${projectContext.workingDirectory}{/yellow-fg}\n`;
+    status += `Yocto Project: ${projectContext.hasYoctoProject ? '{green-fg}✓ Detected{/green-fg}' : '{red-fg}✗ Not found{/red-fg}'}\n`;
+    
+    if (projectContext.projectFiles.length > 0) {
+      status += `\nRelevant Files (${projectContext.projectFiles.length}):\n`;
+      projectContext.projectFiles.slice(0, 10).forEach(file => {
+        status += `  • {cyan-fg}${file}{/cyan-fg}\n`;
+      });
+      if (projectContext.projectFiles.length > 10) {
+        status += `  ... and ${projectContext.projectFiles.length - 10} more\n`;
+      }
+    }
+    
+    if (!projectContext.hasYoctoProject) {
+      status += `\n{yellow-fg}💡 Ask the AI to help you:{/yellow-fg}\n`;
+      status += '  • "Help me set up a new Yocto project"\n';
+      status += '  • "Look for Yocto files in subdirectories"\n';
+      status += '  • "Create a minimal Yocto environment"\n';
+    }
+    
+    return status;
+  }
+
   showHelp() {
     console.log(chalk.blue('🚀 Beacon - AI-powered Yocto Project Assistant'));
     console.log(chalk.gray('\nUsage:'));
     console.log('  beacon [message]                    # Send a message to Yocto AI');
     console.log('  beacon                              # Start interactive chat mode');
-    console.log('  beacon demo-prompts                 # Demonstrate all prompt types');
     console.log('\nExamples:');
     console.log('  beacon "Create a Qt5 recipe"');
     console.log('  beacon "Help debug my build error"');
     console.log('  beacon "Set up WiFi drivers for i.MX8"');
     console.log('\nCommands:');
-    console.log('  demo-prompts                        # Try all available prompt types');
     console.log('  help                                # Show this help');
     console.log('\nInteractive Commands:');
     console.log('  /help or help                       # Show this help');
@@ -310,6 +274,45 @@ User Request: ${message}`;
     console.log('  🐛 Error diagnosis and troubleshooting');
     console.log('  📚 Layer management and dependencies');
     console.log('  ⚙️  Device tree and kernel configuration');
+  }
+
+  getHelpText() {
+    return `{blue-fg}🚀 Beacon - AI-powered Yocto Project Assistant{/blue-fg}
+
+{gray-fg}Usage:{/gray-fg}
+  beacon [message]                    # Send a message to Yocto AI
+  beacon                              # Start interactive chat mode
+
+{gray-fg}Examples:{/gray-fg}
+  beacon "Create a Qt5 recipe"
+  beacon "Help debug my build error"
+  beacon "Set up WiFi drivers for i.MX8"
+
+{gray-fg}Commands:{/gray-fg}
+  help                                # Show this help
+
+{gray-fg}Interactive Commands:{/gray-fg}
+  /help or help                       # Show this help
+  /status or status                   # Show project status
+  exit                                # Exit interactive mode
+
+{gray-fg}Options:{/gray-fg}
+  -s, --streaming                     # Enable streaming responses (default: true)
+  -t, --thinking                      # Enable extended thinking mode (default: true)
+  -m, --model <model>                 # AI model (e.g. claude-sonnet-4-20250514, gpt-5)
+  --temperature <temp>                # Temperature for AI responses
+  --proxy-url <url>                   # Proxy server URL
+  -v, --verbose                       # Enable verbose logging
+
+{gray-fg}💡 Beacon specializes in:{/gray-fg}
+  🔧 Machine configurations and BSP development
+  📝 Recipe creation and BitBake syntax
+  🏗️  Build optimization and debugging
+  🔒 Security hardening and license compliance
+  💾 Silicon-specific platform guidance
+  🐛 Error diagnosis and troubleshooting
+  📚 Layer management and dependencies
+  ⚙️  Device tree and kernel configuration`;
   }
 
   async startBeacon(options) {
@@ -376,138 +379,133 @@ User Request: ${message}`;
   async startInteractiveMode(options) {
     const cwd = process.cwd();
     const hasYoctoProject = await this.detectYoctoProject(cwd);
+    
+    // Build welcome message
+    const welcomeBox = `{cyan-fg}╭───────────────────────────────────────────────────╮{/cyan-fg}
+{cyan-fg}│ ✻ Welcome to Beacon!                              │{/cyan-fg}
+{cyan-fg}│                                                   │{/cyan-fg}
+{cyan-fg}│   /help for help, /status for your current setup  │{/cyan-fg}
+{cyan-fg}│                                                   │{/cyan-fg}
+{cyan-fg}│   cwd: ${cwd.substring(0, 42).padEnd(42)} │{/cyan-fg}
+{cyan-fg}╰───────────────────────────────────────────────────╯{/cyan-fg}`;
 
-    // Track Ctrl+C presses to support "press twice to exit"
-    let lastSigintAt = 0;
-    const SIGINT_WINDOW_MS = 2000;
-    let sigintJustHandled = false;
-    process.on('SIGINT', () => {
-      const now = Date.now();
-      if (now - lastSigintAt < SIGINT_WINDOW_MS) {
-        restoreCursor();
-        console.log('\n👋 Happy building with Yocto!');
-        process.exit(130);
-      }
-      lastSigintAt = now;
-      sigintJustHandled = true;
-      // Reset flag on next tick so prompt catch won't double-handle
-      setImmediate(() => { sigintJustHandled = false; });
-      console.log();
-      console.log(chalk.yellow('Press CTRL-C again to exit'));
-    });
-
+    let statusMessage = '';
     if (hasYoctoProject) {
-      console.log(' Status:');
-      console.log('  • Yocto project detected - ask me anything about your setup!');
+      statusMessage = ' Status:\n  • Yocto project detected - ask me anything about your setup!';
     } else {
-      console.log(' Status:');
-      console.log('  • No Yocto project found - I can help you get started');
+      statusMessage = ' Status:\n  • No Yocto project found - I can help you get started';
     }
 
-    console.log(' Ready to help with:');
-    console.log('  • Yocto project setup and configuration');
-    console.log('  • Recipe creation and debugging');
-    console.log('  • Build issues and optimization');
-    console.log('  • Layer management and BSP development');
+    const readyMessage = ' Ready to help with:\n  • Yocto project setup and configuration\n  • Recipe creation and debugging\n  • Build issues and optimization\n  • Layer management and BSP development';
+    
     const activeModel = (options && options.model) || process.env.DEFAULT_MODEL || 'gpt-4o-mini';
-    console.log(chalk.gray(`Model: ${activeModel}  (override with -m <model> or DEFAULT_MODEL env)`));
-    console.log();
-
+    const modelMessage = `{grey-fg}Model: ${activeModel}  (override with -m <model> or DEFAULT_MODEL env){/grey-fg}`;
+    
+    const fullWelcome = `${welcomeBox}\n\n${statusMessage}\n\n${readyMessage}\n\n${modelMessage}\n`;
+    
     const context = [];
     
-    while (true) {
-      try {
-        const message = await PromptHelper.input('>', {
-          validate: (input) => input.trim().length > 0 || 'Please enter a message'
-        });
-
-        if (message.toLowerCase() === 'exit') {
-          break;
-        }
-
-        if (message.toLowerCase() === '/help' || message.toLowerCase() === 'help') {
-          this.showHelp();
-          continue;
-        }
-
-        if (message.toLowerCase() === '/status' || message.toLowerCase() === 'status') {
-          await this.showProjectStatus();
-          continue;
-        }
-
-
-        // Add user message to context
-        context.push({ role: 'user', content: message });
-
-        // Get project context for each message
-        const projectContext = await this.getProjectContext();
-        
-        // Enhance message with context
-        const contextualMessage = `Working Directory: ${projectContext.workingDirectory}
+    // Ctrl+C tracking for double-press exit
+    let lastCtrlC = 0;
+    const CTRL_C_WINDOW = 2000; // 2 seconds
+    
+    // Create shell
+    const shell = createShell({
+      welcome: fullWelcome,
+      placeholder: '> Try "write a test for index.js"',
+      onSubmit: async (message) => {
+        try {
+          // Show user message
+          shell.user(message);
+          
+          // Handle special commands
+          if (message.toLowerCase() === 'exit') {
+            shell.destroy();
+            console.log('\n👋 Happy building with Yocto!');
+            process.exit(0);
+            return;
+          }
+          
+          // Handle slash commands
+          if (message.startsWith('/')) {
+            await this.handleSlashCommand(message, shell, options);
+            return;
+          }
+          
+          // Add user message to context
+          context.push({ role: 'user', content: message });
+          
+          // Get project context for each message
+          const projectContext = await this.getProjectContext();
+          
+          // Enhance message with context
+          const contextualMessage = `Working Directory: ${projectContext.workingDirectory}
 ${projectContext.hasYoctoProject ? 'Yocto Project: Detected' : 'Yocto Project: Not detected'}
 ${projectContext.projectFiles.length > 0 ? `Relevant files: ${projectContext.projectFiles.slice(0, 5).join(', ')}` : ''}
 
 User Request: ${message}`;
-
-        const requestData = {
-          message: contextualMessage,
-          context: context.slice(0, -1),
-          useYoctoPrompt: true,
-          model: options.model || process.env.DEFAULT_MODEL || 'gpt-4o-mini',
-          temperature: options.thinking === true ? 1 : 0.1, // Must be 1 when thinking is enabled
-          maxTokens: 16000,
-          streaming: options.streaming !== false,
-          extendedThinking: options.thinking === true, // Default to false
-          tools: []
-        };
-
-        if (requestData.streaming) {
-          const response = await this.handleStreamingResponse(requestData);
-          // Add assistant response to context
-          if (response.response) {
-            context.push({ role: 'assistant', content: response.response });
-          }
-        } else {
-          const response = await this.apiClient.chat(requestData);
-          console.log(response.response);
           
-          // Add assistant response to context
-          context.push({ role: 'assistant', content: response.response });
-
-          if (response.usage && options.verbose) {
-            console.log(chalk.gray(`📊 ${response.usage.input_tokens} in, ${response.usage.output_tokens} out tokens`));
+          const requestData = {
+            message: contextualMessage,
+            context: context.slice(0, -1),
+            useYoctoPrompt: true,
+            model: options.model || process.env.DEFAULT_MODEL || 'gpt-4o-mini',
+            temperature: options.thinking === true ? 1 : 0.1,
+            maxTokens: 16000,
+            streaming: options.streaming !== false,
+            extendedThinking: options.thinking === true,
+            tools: []
+          };
+          
+          if (requestData.streaming) {
+            const response = await this.handleStreamingResponseShell(requestData, shell);
+            if (response.response) {
+              context.push({ role: 'assistant', content: response.response });
+            }
+          } else {
+            const response = await this.apiClient.chat(requestData);
+            shell.assistant();
+            shell.write(response.response);
+            
+            context.push({ role: 'assistant', content: response.response });
+            
+            if (response.usage && options.verbose) {
+              shell.info(`📊 ${response.usage.input_tokens} in, ${response.usage.output_tokens} out tokens`);
+            }
           }
+          
+        } catch (error) {
+          shell.error(error.message);
         }
-
-        console.log(); // Empty line for spacing
-
-      } catch (error) {
-        // Friendly Ctrl+C handling: first press shows hint, second within window exits
-        const msg = String((error && error.message) || '');
-        const isSigint = (
-          error && (error.signal === 'SIGINT' || error.name === 'AbortError' || error.isCanceled === true)
-        ) || /SIGINT|canceled|cancelled|aborted|force closed/i.test(msg);
-
-        if (isSigint) {
-          if (sigintJustHandled) {
-            // Process-level handler already displayed the hint; just re-prompt
-            continue;
-          }
-          const now = Date.now();
-          if (now - lastSigintAt < SIGINT_WINDOW_MS) {
-            restoreCursor();
-            console.log('\n👋 Happy building with Yocto!');
-            process.exit(130); // 130 = terminated by Ctrl+C
-          }
-          lastSigintAt = now;
-          console.log();
-          console.log(chalk.yellow('Press CTRL-C again to exit'));
-          continue; // re-prompt
-        }
-
-        console.error(chalk.red('❌ Error:'), error.message);
       }
-    }
+    });
+    
+    // Handle Ctrl+C double-press
+    shell.screen.on('beacon-exit', () => {
+      const now = Date.now();
+      if (now - lastCtrlC < CTRL_C_WINDOW) {
+        // Second press - exit
+        shell.destroy();
+        console.log('\n👋 Happy building with Yocto!');
+        process.exit(130);
+      } else {
+        // First press - show hint
+        lastCtrlC = now;
+        shell.info('Press CTRL-C again to exit');
+      }
+    });
+    
+    // Handle process signals
+    const cleanup = () => {
+      shell.destroy();
+      this.apiClient.disconnect();
+    };
+    
+    process.on('SIGTERM', cleanup);
+    process.on('SIGINT', cleanup);
+    
+    // Keep the process alive
+    return new Promise(() => {});
   }
 
 
@@ -528,77 +526,98 @@ User Request: ${message}`;
     }
   }
 
-
-  async demoPrompts() {
-    console.log(chalk.blue('\n🎨 Inquirer Prompts Demo'));
-    console.log(chalk.gray('─'.repeat(50)));
-
-    try {
-      // Input prompt
-      const name = await PromptHelper.input('What is your name?');
-      console.log(chalk.green(`Hello, ${name}!`));
-
-      // Select prompt
-      const color = await PromptHelper.select('What is your favorite color?', [
-        'red', 'green', 'blue', 'yellow', 'purple'
-      ]);
-      console.log(chalk.green(`Nice choice: ${color}`));
-
-      // Confirm prompt
-      const likes = await PromptHelper.confirm('Do you like Yocto development?', { default: true });
-      console.log(chalk.green(likes ? 'Great! This tool will help you.' : 'This tool might change your mind!'));
-
-      // Multiple select prompt
-      const tools = await PromptHelper.multiSelect('Which development tools do you use?', [
-        { name: 'VS Code', value: 'vscode' },
-        { name: 'Vim/Neovim', value: 'vim' },
-        { name: 'Emacs', value: 'emacs' },
-        { name: 'BitBake', value: 'bitbake' },
-        { name: 'Git', value: 'git' },
-        { name: 'Docker', value: 'docker' }
-      ]);
-      console.log(chalk.green(`Your tools: ${tools.map(t => t.value || t).join(', ')}`));
-
-      // Number prompt
-      const experience = await PromptHelper.number('How many years of Linux experience do you have?', {
-        min: 0,
-        max: 50
-      });
-      console.log(chalk.green(`${experience} years - ${experience > 5 ? 'experienced!' : 'welcome to the journey!'}`));
-
-      // Expand prompt (single letter shortcuts)
-      const action = await PromptHelper.expand('What would you like to do next?', [
-        { key: 'c', name: 'Create a new recipe', value: 'create' },
-        { key: 'b', name: 'Build an image', value: 'build' },
-        { key: 'd', name: 'Debug an issue', value: 'debug' },
-        { key: 'q', name: 'Quit demo', value: 'quit' }
-      ]);
-      console.log(chalk.green(`Selected action: ${action.value || action}`));
-
-      // Raw list prompt (numbered)
-      const priority = await PromptHelper.rawList('What is your top priority?', [
-        'Fast build times',
-        'Small image size', 
-        'Security hardening',
-        'Easy debugging',
-        'Rich feature set'
-      ]);
-      console.log(chalk.green(`Your priority: ${priority}`));
-
-      // Editor prompt (opens editor)
-      const editDemo = await PromptHelper.confirm('Would you like to try the editor prompt?', { default: false });
-      if (editDemo) {
-        const recipe = await PromptHelper.editor('Write a simple BitBake recipe (opens in your default editor):');
-        console.log(chalk.green(`Recipe content (${recipe.length} characters):`));
-        console.log(chalk.gray(recipe.substring(0, 200) + (recipe.length > 200 ? '...' : '')));
-      }
-
-      console.log(chalk.blue('\n✨ Demo complete! All prompt types are now available in your CLI.'));
-
-    } catch (error) {
-      console.error(chalk.red('❌ Demo cancelled:'), error.message);
+  async handleSlashCommand(message, shell, options) {
+    const [command, ...args] = message.slice(1).split(' ');
+    
+    switch (command.toLowerCase()) {
+      case 'help':
+        shell.write(this.getHelpText());
+        break;
+        
+      case 'status':
+        const statusText = await this.getProjectStatusText();
+        shell.write(statusText);
+        break;
+        
+      case 'model':
+        if (args.length > 0) {
+          const newModel = args.join(' ');
+          options.model = newModel;
+          shell.success(`Model changed to: ${newModel}`);
+        } else {
+          const currentModel = options.model || process.env.DEFAULT_MODEL || 'gpt-4o-mini';
+          shell.info(`Current model: ${currentModel}`);
+        }
+        break;
+        
+      case 'temperature':
+        if (args.length > 0) {
+          const temp = parseFloat(args[0]);
+          if (isNaN(temp) || temp < 0 || temp > 2) {
+            shell.error('Temperature must be a number between 0 and 2');
+          } else {
+            options.temperature = temp;
+            shell.success(`Temperature set to: ${temp}`);
+          }
+        } else {
+          shell.info(`Current temperature: ${options.temperature || 0.1}`);
+        }
+        break;
+        
+      case 'thinking':
+        options.thinking = !options.thinking;
+        shell.success(`Extended thinking ${options.thinking ? 'enabled' : 'disabled'}`);
+        break;
+        
+      case 'streaming':
+        options.streaming = !options.streaming;
+        shell.success(`Streaming ${options.streaming ? 'enabled' : 'disabled'}`);
+        break;
+        
+      case 'clear':
+        shell.clear();
+        break;
+        
+      default:
+        shell.info(`Available slash commands:
+  /help - Show help information
+  /status - Show project status
+  /model [name] - Get or set AI model
+  /temperature [0-2] - Get or set temperature
+  /thinking - Toggle extended thinking mode
+  /streaming - Toggle streaming responses  
+  /clear - Clear output
+  exit - Exit interactive mode`);
     }
   }
+
+  async handleStreamingResponseShell(requestData, shell) {
+    try {
+      shell.assistant(); // Start with assistant header
+      
+      // Custom streaming handler for shell
+      let fullResponse = '';
+      
+      const response = await this.apiClient.chatStream(requestData, (chunk) => {
+        fullResponse += chunk;
+        shell.writeRaw(chunk);
+      });
+      
+      // Add final newline
+      shell.writeRaw('\n\n');
+      
+      if (response.usage && requestData.verbose) {
+        shell.info(`📊 Usage: ${response.usage.input_tokens} input, ${response.usage.output_tokens} output tokens`);
+      }
+      
+      return { ...response, response: fullResponse };
+    } catch (error) {
+      shell.error(`Streaming error: ${error.message}`);
+      throw error;
+    }
+  }
+
+
 
   run() {
     this.program.parse();

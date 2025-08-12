@@ -6,8 +6,10 @@ Beacon is a conversational AI CLI tool for embedded Linux developers, like "Lova
 
 ### 💬 **Conversational Interface**
 - **Chat-Only CLI**: Simple interface like `claude` or `gemini` - just ask questions
+- **Claude-Style Input**: Persistent bottom input box with clean terminal UI
 - **Natural Language**: Describe what you need in plain English
 - **Real-time Streaming**: Get responses as they're generated
+- **Multi-line Support**: Press Shift+Enter for newlines, Enter to send
 - **File Operations**: Read, write, and modify local files through conversation
 
 ### 🧠 **Yocto Project Expertise**
@@ -60,6 +62,11 @@ beacon demo-prompts
 beacon
 > How do I add CAN bus support to my embedded Linux?
 > Create a machine configuration for my custom ARM board
+
+# Interface Controls:
+# • Press Shift+Enter for newline, Enter to send
+# • Press CTRL-C twice to exit
+# • Type /help for slash commands
 > What's the best way to handle GPLv3 compliance?
 > exit
 

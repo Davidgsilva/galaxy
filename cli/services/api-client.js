@@ -51,7 +51,7 @@ class ApiClient {
         }
 
         if (attempt < this.retryAttempts) {
-          console.log(chalk.yellow(`⚠️  Request failed, retrying in ${this.retryDelay}ms (attempt ${attempt}/${this.retryAttempts})`));
+          // console.log(chalk.yellow(`⚠️  Request failed, retrying in ${this.retryDelay}ms (attempt ${attempt}/${this.retryAttempts})`));
           await this.sleep(this.retryDelay);
           this.retryDelay *= 2; // Exponential backoff
         }
@@ -79,7 +79,7 @@ class ApiClient {
     }
   }
 
-  async chatStream(requestData) {
+  async chatStream(requestData, customCallback = null) {
     try {
       return new Promise((resolve, reject) => {
         let fullResponse = '';
@@ -92,18 +92,32 @@ class ApiClient {
           (data) => {
             if (data.type === 'thinking') {
               if (!isThinking) {
-                console.log('\n✻ Thinking…');
-                console.log();
+                if (!customCallback) {
+                  // console.log('\n✻ Thinking…');
+                  // console.log();
+                }
                 isThinking = true;
               }
-              process.stdout.write(chalk.gray(data.content));
-              fullThinking += data.content;
+              if (customCallback) {
+                // Don't show thinking in UI for now, but could be added later
+                fullThinking += data.content;
+              } else {
+                process.stdout.write(chalk.gray(data.content));
+                fullThinking += data.content;
+              }
             } else if (data.type === 'text') {
               if (isThinking) {
-                console.log('\n');
+                if (!customCallback) {
+                  // console.log('\n');
+                }
                 isThinking = false;
               }
-              process.stdout.write(data.content);
+              
+              if (customCallback) {
+                customCallback(data.content);
+              } else {
+                process.stdout.write(data.content);
+              }
               fullResponse += data.content;
             } else if (data.type === 'end') {
               usage = data.usage;
@@ -403,7 +417,7 @@ class ApiClient {
   // File operation delegation handler (used by server)
   async handleTextEditorOperation(operation, args) {
     try {
-      console.log(chalk.yellow(`🔧 Executing file operation: ${operation} on ${args.path || 'unknown'}`));
+      // console.log(chalk.yellow(`🔧 Executing file operation: ${operation} on ${args.path || 'unknown'}`));
 
       switch (operation) {
         case 'view':
@@ -422,7 +436,7 @@ class ApiClient {
           throw new Error(`Unknown text editor operation: ${operation}`);
       }
     } catch (error) {
-      console.log(chalk.red(`❌ File operation failed: ${error.message}`));
+      // console.log(chalk.red(`❌ File operation failed: ${error.message}`));
       throw error;
     }
   }
@@ -543,7 +557,7 @@ class ApiClient {
   // Register this client with the server for file operations via WebSocket
   async registerForFileOperations() {
     try {
-      console.log(chalk.blue('🔗 Initializing WebSocket connection for file operations...'));
+      // console.log(chalk.blue('🔗 Initializing WebSocket connection for file operations...'));
       
       this.wsClient = new WebSocketFileClient(this.proxyUrl, this.sessionId);
       await this.wsClient.connect();
@@ -553,14 +567,14 @@ class ApiClient {
       
       const status = this.wsClient.getStatus();
       if (status.connected && status.registered) {
-        console.log(chalk.green('✅ WebSocket file operations client ready'));
+        // console.log(chalk.green('✅ WebSocket file operations client ready'));
         return true;
       } else {
-        console.log(chalk.red('❌ WebSocket registration failed'));
+        // console.log(chalk.red('❌ WebSocket registration failed'));
         return false;
       }
     } catch (error) {
-      console.log(chalk.red('❌ WebSocket setup failed:', error.message));
+      // console.log(chalk.red('❌ WebSocket setup failed:', error.message));
       return false;
     }
   }

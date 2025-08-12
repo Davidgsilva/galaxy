@@ -21,7 +21,7 @@ class WebSocketFileClient {
 
   setupEventHandlers() {
     this.client.on('connectFailed', (error) => {
-      console.log(chalk.red('❌ WebSocket connection failed:', error.toString()));
+      // console.log(chalk.red('❌ WebSocket connection failed:', error.toString()));
       this.scheduleReconnect();
     });
 
@@ -31,14 +31,14 @@ class WebSocketFileClient {
       this.reconnectAttempts = 0;
       this.reconnectDelay = 1000;
 
-      console.log(chalk.green('🔗 WebSocket connected successfully'));
+      // console.log(chalk.green('🔗 WebSocket connected successfully'));
 
       connection.on('error', (error) => {
-        console.log(chalk.red('🔗 WebSocket connection error:', error.toString()));
+        // console.log(chalk.red('🔗 WebSocket connection error:', error.toString()));
       });
 
       connection.on('close', () => {
-        console.log(chalk.yellow('🔗 WebSocket connection closed'));
+        // console.log(chalk.yellow('🔗 WebSocket connection closed'));
         this.isConnected = false;
         this.isRegistered = false;
         this.scheduleReconnect();
@@ -55,17 +55,17 @@ class WebSocketFileClient {
 
   async connect() {
     try {
-      console.log(chalk.blue('🔗 Connecting to WebSocket server...'));
+      // console.log(chalk.blue('🔗 Connecting to WebSocket server...'));
       this.client.connect(`${this.serverUrl}`, 'file-operations');
     } catch (error) {
-      console.log(chalk.red('❌ Failed to initiate WebSocket connection:', error.message));
+      // console.log(chalk.red('❌ Failed to initiate WebSocket connection:', error.message));
       this.scheduleReconnect();
     }
   }
 
   register() {
     if (!this.connection || !this.isConnected) {
-      console.log(chalk.red('❌ Cannot register: WebSocket not connected'));
+      // console.log(chalk.red('❌ Cannot register: WebSocket not connected'));
       return;
     }
 
@@ -77,19 +77,19 @@ class WebSocketFileClient {
     };
 
     this.connection.sendUTF(JSON.stringify(message));
-    console.log(chalk.blue('📝 Registering WebSocket client for file operations...'));
+    // console.log(chalk.blue('📝 Registering WebSocket client for file operations...'));
   }
 
   scheduleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log(chalk.red('❌ Max reconnection attempts reached. Manual restart required.'));
+      // console.log(chalk.red('❌ Max reconnection attempts reached. Manual restart required.'));
       return;
     }
 
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1); // Exponential backoff
 
-    console.log(chalk.yellow(`🔄 Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`));
+    // console.log(chalk.yellow(`🔄 Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`));
 
     setTimeout(() => {
       this.connect();
@@ -118,21 +118,21 @@ class WebSocketFileClient {
             // Heartbeat acknowledged
             break;
           default:
-            console.log(chalk.yellow('🔗 Unknown WebSocket message type:', data.type));
+            // console.log(chalk.yellow('🔗 Unknown WebSocket message type:', data.type));
         }
       }
     } catch (error) {
-      console.log(chalk.red('❌ Error handling WebSocket message:', error.message));
+      // console.log(chalk.red('❌ Error handling WebSocket message:', error.message));
     }
   }
 
   handleRegistrationSuccess(data) {
     this.isRegistered = true;
-    console.log(chalk.green('✅ WebSocket client registered for file operations'));
+    // console.log(chalk.green('✅ WebSocket client registered for file operations'));
   }
 
   handleRegistrationError(data) {
-    console.log(chalk.red('❌ WebSocket registration failed:', data.message));
+    // console.log(chalk.red('❌ WebSocket registration failed:', data.message));
   }
 
   handlePing() {
@@ -148,7 +148,7 @@ class WebSocketFileClient {
     const { operationId, operation, params } = data;
 
     try {
-      console.log(chalk.blue(`📁 Executing file operation: ${operation}`));
+      // console.log(chalk.blue(`📁 Executing file operation: ${operation}`));
 
       let result;
       switch (operation) {
@@ -182,10 +182,10 @@ class WebSocketFileClient {
         timestamp: new Date().toISOString()
       }));
 
-      console.log(chalk.green(`✅ File operation ${operation} completed successfully`));
+      // console.log(chalk.green(`✅ File operation ${operation} completed successfully`));
 
     } catch (error) {
-      console.log(chalk.red(`❌ File operation ${operation} failed:`, error.message));
+      // console.log(chalk.red(`❌ File operation ${operation} failed:`, error.message));
 
       // Send error result back to server
       this.connection.sendUTF(JSON.stringify({
@@ -308,7 +308,7 @@ class WebSocketFileClient {
   async handleBashExecuteOperation(params) {
     const { command, cwd } = params;
     const { spawn } = require('child_process');
-    const { confirm } = require('@inquirer/prompts');
+    const readline = require('readline');
     const path = require('path');
 
     if (!command || typeof command !== 'string') {
@@ -316,21 +316,18 @@ class WebSocketFileClient {
     }
 
     // Show command to user and ask for confirmation
-    console.log(chalk.yellow('\n🔧 Beacon wants to execute the following command:'));
-    console.log(chalk.cyan(`   ${command}`));
+    // console.log(chalk.yellow('\n🔧 Beacon wants to execute the following command:'));
+    // console.log(chalk.cyan(`   ${command}`));
     
     if (cwd && cwd !== '.') {
       const resolvedCwd = path.resolve(cwd);
-      console.log(chalk.gray(`   Working directory: ${resolvedCwd}`));
+      // console.log(chalk.gray(`   Working directory: ${resolvedCwd}`));
     }
     
-    console.log(chalk.gray('   This command will be executed on your local system.'));
+    // console.log(chalk.gray('   This command will be executed on your local system.'));
     
     try {
-      const shouldExecute = await confirm({
-        message: 'Do you want to execute this command?',
-        default: false
-      });
+      const shouldExecute = await this.askConfirmation('Do you want to execute this command? (y/N)');
 
       if (!shouldExecute) {
         return {
@@ -354,7 +351,7 @@ class WebSocketFileClient {
       };
     }
 
-    console.log(chalk.green('✅ Executing command...'));
+    // console.log(chalk.green('✅ Executing command...'));
 
     return new Promise((resolve, reject) => {
       const workingDir = cwd ? path.resolve(cwd) : process.cwd();
@@ -383,7 +380,7 @@ class WebSocketFileClient {
 
       child.on('close', (code) => {
         if (code === 0) {
-          console.log(chalk.green(`\n✅ Command completed successfully (exit code: ${code})`));
+          // console.log(chalk.green(`\n✅ Command completed successfully (exit code: ${code})`));
           resolve({
             success: true,
             command: command,
@@ -392,7 +389,7 @@ class WebSocketFileClient {
             workingDirectory: workingDir
           });
         } else {
-          console.log(chalk.red(`\n❌ Command failed with exit code: ${code}`));
+          // console.log(chalk.red(`\n❌ Command failed with exit code: ${code}`));
           resolve({
             success: false,
             command: command,
@@ -405,7 +402,7 @@ class WebSocketFileClient {
       });
 
       child.on('error', (error) => {
-        console.log(chalk.red(`\n❌ Failed to execute command: ${error.message}`));
+        // console.log(chalk.red(`\n❌ Failed to execute command: ${error.message}`));
         reject(new Error(`Failed to execute command: ${error.message}`));
       });
     });
@@ -413,7 +410,7 @@ class WebSocketFileClient {
 
   disconnect() {
     if (this.connection && this.isConnected) {
-      console.log(chalk.yellow('🔗 Disconnecting WebSocket...'));
+      // console.log(chalk.yellow('🔗 Disconnecting WebSocket...'));
       this.connection.close();
     }
   }
@@ -425,6 +422,20 @@ class WebSocketFileClient {
       sessionId: this.sessionId,
       clientId: this.clientId
     };
+  }
+
+  askConfirmation(question) {
+    return new Promise((resolve) => {
+      const rl = require('readline').createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+      
+      rl.question(question + ' ', (answer) => {
+        rl.close();
+        resolve(answer.toLowerCase().trim() === 'y' || answer.toLowerCase().trim() === 'yes');
+      });
+    });
   }
 }
 
