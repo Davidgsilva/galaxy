@@ -306,49 +306,106 @@ class WebSocketFileClient {
   }
 
   async handleBashExecuteOperation(params) {
-    const { command } = params;
+    const { command, cwd } = params;
     const { spawn } = require('child_process');
+    const { confirm } = require('@inquirer/prompts');
+    const path = require('path');
 
     if (!command || typeof command !== 'string') {
       throw new Error('Command parameter is required and must be a string');
     }
 
+    // Show command to user and ask for confirmation
+    console.log(chalk.yellow('\n🔧 Beacon wants to execute the following command:'));
+    console.log(chalk.cyan(`   ${command}`));
+    
+    if (cwd && cwd !== '.') {
+      const resolvedCwd = path.resolve(cwd);
+      console.log(chalk.gray(`   Working directory: ${resolvedCwd}`));
+    }
+    
+    console.log(chalk.gray('   This command will be executed on your local system.'));
+    
+    try {
+      const shouldExecute = await confirm({
+        message: 'Do you want to execute this command?',
+        default: false
+      });
+
+      if (!shouldExecute) {
+        return {
+          success: false,
+          command: command,
+          output: '',
+          error: 'Command execution cancelled by user',
+          exitCode: 1,
+          cancelled: true
+        };
+      }
+    } catch (error) {
+      // Handle Ctrl+C or prompt cancellation
+      return {
+        success: false,
+        command: command,
+        output: '',
+        error: 'Command execution cancelled by user',
+        exitCode: 1,
+        cancelled: true
+      };
+    }
+
+    console.log(chalk.green('✅ Executing command...'));
+
     return new Promise((resolve, reject) => {
+      const workingDir = cwd ? path.resolve(cwd) : process.cwd();
+      
       const child = spawn('bash', ['-c', command], {
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: workingDir
       });
 
       let stdout = '';
       let stderr = '';
 
       child.stdout.on('data', (data) => {
-        stdout += data.toString();
+        const output = data.toString();
+        stdout += output;
+        // Show real-time output to user
+        process.stdout.write(chalk.gray(output));
       });
 
       child.stderr.on('data', (data) => {
-        stderr += data.toString();
+        const output = data.toString();
+        stderr += output;
+        // Show real-time errors to user
+        process.stderr.write(chalk.red(output));
       });
 
       child.on('close', (code) => {
         if (code === 0) {
+          console.log(chalk.green(`\n✅ Command completed successfully (exit code: ${code})`));
           resolve({
             success: true,
             command: command,
             output: stdout,
-            exitCode: code
+            exitCode: code,
+            workingDirectory: workingDir
           });
         } else {
+          console.log(chalk.red(`\n❌ Command failed with exit code: ${code}`));
           resolve({
             success: false,
             command: command,
             output: stdout,
             error: stderr,
-            exitCode: code
+            exitCode: code,
+            workingDirectory: workingDir
           });
         }
       });
 
       child.on('error', (error) => {
+        console.log(chalk.red(`\n❌ Failed to execute command: ${error.message}`));
         reject(new Error(`Failed to execute command: ${error.message}`));
       });
     });

@@ -74,39 +74,15 @@ Use exec_command for essential Yocto operations:
 // Store client endpoints for delegation
 const clientEndpoints = new Map();
 
-// Helper function to delegate text editor operations to client
+// Legacy alias for text editor operations
 async function delegateTextEditorToClient(sessionId, toolInput) {
-  if (!sessionId) {
-    throw new Error('Session ID required for text editor operations');
-  }
-
-  // Check if client is registered
-  const clientInfo = clientConnections.get(sessionId);
-  if (!clientInfo) {
-    throw new Error('No file operation client registered. Make sure the client is running and has called registerForFileOperations().');
-  }
-
-  try {
-    logger.info('Delegating text editor operation to client', { 
-      sessionId, 
-      command: toolInput.command,
-      path: toolInput.path 
-    });
-
-    // Delegate to WebSocket client
-    const result = await global.wsFileHandler.delegateFileOperation(sessionId, toolInput.command, toolInput);
-
-    return result;
-    
-  } catch (error) {
-    logger.error('Client delegation failed:', error);
-    throw new Error(`File operation failed: ${error.message}`);
-  }
+  return await handleToolUse({ name: 'str_replace_based_edit_tool', input: toolInput }, sessionId, 'anthropic');
 }
 
-async function handleOpenAIToolUse(toolUse, sessionId) {
+// Unified tool use handler for both OpenAI and Anthropic
+async function handleToolUse(toolUse, sessionId, provider = 'unified') {
   if (!sessionId) {
-    throw new Error('Session ID required for OpenAI tool operations');
+    throw new Error('Session ID required for tool operations');
   }
 
   // Check if WebSocket client is connected
@@ -115,26 +91,28 @@ async function handleOpenAIToolUse(toolUse, sessionId) {
   }
 
   const clientStatus = global.wsFileHandler.getClientStatus(sessionId);
-  logger.info('Checking WebSocket client status', { 
-    sessionId, 
+  logger.info('Checking WebSocket client status', {
+    sessionId,
     clientStatus,
-    allClients: global.wsFileHandler.getAllClients().length 
+    allClients: global.wsFileHandler.getAllClients().length,
+    provider
   });
-  
+
   if (!clientStatus.connected) {
     throw new Error(`No file operation client connected for session ${sessionId}. Make sure the CLI is running and connected via WebSocket.`);
   }
 
   try {
-    logger.info('Handling OpenAI tool use', { 
-      sessionId, 
+    logger.info('Handling tool use', {
+      sessionId,
       toolName: toolUse.name,
-      input: toolUse.input 
+      input: toolUse.input,
+      provider
     });
 
     const { name, input } = toolUse;
 
-    // Map OpenAI function names to operations
+    // Unified tool mapping for both OpenAI and Anthropic
     switch (name) {
       case 'list_dir':
         if (input && input.dir != null && typeof input.dir !== 'string') {
@@ -143,13 +121,13 @@ async function handleOpenAIToolUse(toolUse, sessionId) {
         return await global.wsFileHandler.delegateFileOperation(sessionId, 'view', {
           path: (input && typeof input.dir === 'string' ? input.dir : '.')
         });
-      
+
       case 'fs_view':
         if (!input || typeof input.path !== 'string' || input.path.trim() === '') {
           throw new Error('fs_view.path is required and must be a non-empty string');
         }
         return await global.wsFileHandler.delegateFileOperation(sessionId, 'view', { path: input.path });
-      
+
       case 'fs_create':
         if (!input || typeof input.path !== 'string' || typeof input.content !== 'string') {
           throw new Error('fs_create requires string path and string content');
@@ -158,7 +136,7 @@ async function handleOpenAIToolUse(toolUse, sessionId) {
           path: input.path,
           file_text: input.content
         });
-      
+
       case 'fs_update':
         if (!input || typeof input.path !== 'string' || typeof input.find !== 'string' || typeof input.replace !== 'string') {
           throw new Error('fs_update requires string path, string find, and string replace');
@@ -168,7 +146,7 @@ async function handleOpenAIToolUse(toolUse, sessionId) {
           old_str: input.find,
           new_str: input.replace
         });
-      
+
       case 'fs_insert':
         if (!input || typeof input.path !== 'string' || typeof input.content !== 'string' || typeof input.line !== 'number' || input.line < 1) {
           throw new Error('fs_insert requires string path, string content, and integer line >= 1');
@@ -178,7 +156,7 @@ async function handleOpenAIToolUse(toolUse, sessionId) {
           new_str: input.content,
           insert_line: input.line
         });
-      
+
       case 'fs_delete':
         if (!input || typeof input.path !== 'string') {
           throw new Error('fs_delete requires string path');
@@ -186,33 +164,64 @@ async function handleOpenAIToolUse(toolUse, sessionId) {
         if (!input.confirm) {
           throw new Error('Delete operation requires explicit confirmation');
         }
-        // For now, we don't have a delete operation in handleTextEditorOperation
-        // This would need to be implemented in the client side
         throw new Error('File deletion not implemented via text editor operations');
-      
+
       case 'exec_command':
-        if (!input || typeof input.command !== 'string' || input.command.trim() === '') {
-          throw new Error('exec_command requires non-empty string command');
+        // Enhanced validation and logging for exec_command
+        if (!input) {
+          console.error('exec_command validation failed: no input provided');
+          throw new Error('exec_command requires input with command field');
+        }
+
+        if (!input.hasOwnProperty('command')) {
+          console.error('exec_command validation failed: missing command field', { input });
+          throw new Error('exec_command requires command field');
+        }
+
+        if (typeof input.command !== 'string') {
+          console.error('exec_command validation failed: command is not a string', {
+            input,
+            commandType: typeof input.command,
+            commandValue: input.command
+          });
+          throw new Error('exec_command command must be a string');
+        }
+
+        if (input.command.trim() === '') {
+          console.error('exec_command validation failed: empty command string', { input });
+          throw new Error('exec_command command cannot be empty');
         }
         return await global.wsFileHandler.delegateFileOperation(sessionId, 'exec', {
           command: input.command,
           cwd: input.cwd || '.'
         });
-      
+
+      // Handle Anthropic text editor tool (legacy compatibility)
+      case 'str_replace_based_edit_tool':
+        if (!input || typeof input.command !== 'string') {
+          throw new Error('str_replace_based_edit_tool requires command');
+        }
+        return await global.wsFileHandler.delegateFileOperation(sessionId, input.command, input);
+
       default:
-        throw new Error(`Unknown OpenAI tool: ${name}`);
+        throw new Error(`Unknown tool: ${name}`);
     }
-    
+
   } catch (error) {
-    logger.error('OpenAI tool use failed:', error);
-    throw new Error(`OpenAI tool operation failed: ${error.message}`);
+    logger.error('Tool use failed:', error);
+    throw new Error(`Tool operation failed: ${error.message}`);
   }
+}
+
+// Legacy wrapper for backward compatibility
+async function handleOpenAIToolUse(toolUse, sessionId) {
+  return await handleToolUse(toolUse, sessionId, 'openai');
 }
 
 // Endpoint for clients to register their delegation endpoint
 router.post('/register-client-endpoint', (req, res) => {
   const { sessionId, endpoint } = req.body;
-  
+
   if (!sessionId || !endpoint) {
     return res.status(400).json({
       success: false,
@@ -221,9 +230,9 @@ router.post('/register-client-endpoint', (req, res) => {
   }
 
   clientEndpoints.set(sessionId, endpoint);
-  
+
   logger.info('Client endpoint registered', { sessionId, endpoint });
-  
+
   res.json({
     success: true,
     message: 'Client endpoint registered successfully',
@@ -235,16 +244,16 @@ router.post('/register-client-endpoint', (req, res) => {
 // Main AI interaction endpoint
 router.post('/', validateChatRequest, async (req, res) => {
   try {
-    const { 
-      message, 
-      context = [], 
+    const {
+      message,
+      context = [],
       model = process.env.DEFAULT_MODEL || 'gpt-4o-mini',
       temperature = 0.1,
       maxTokens = 8192,
       streaming = false,
       extendedThinking = false,
       useCache = true,
-      useYoctoPrompt = false,
+      useYoctoPrompt = true,
       tools = []
     } = req.body;
 
@@ -260,7 +269,7 @@ router.post('/', validateChatRequest, async (req, res) => {
     if (useCache) {
       const cacheKey = CacheService.generateKey('chat', { message, context, model, useYoctoPrompt });
       const cachedResponse = await CacheService.get(cacheKey);
-      
+
       if (cachedResponse) {
         logger.info('Cache hit for chat request');
         return res.json({
@@ -272,24 +281,56 @@ router.post('/', validateChatRequest, async (req, res) => {
       }
     }
 
-    // Use Yocto-specific system prompt if requested
-    const systemPrompt = useYoctoPrompt ? YOCTO_SYSTEM_PROMPT : `You are Beacon, an AI assistant that helps with software development and system administration tasks.
+    // Use Yocto-specific system prompt if requested, otherwise use unified system prompt
+    const systemPrompt = useYoctoPrompt ? YOCTO_SYSTEM_PROMPT : `You are Beacon, an AI assistant that helps with software development and system administration tasks, with specialized expertise in Yocto Project and embedded Linux development.
 
-Available capabilities:
+## Core Mission
+Assist with software development tasks, with particular strength in Yocto Project, embedded Linux, and system administration.
+
+## Current Yocto LTS Release
+Use Yocto Project 5.0 "Scarthgap" (current LTS until April 2028) for all new Yocto projects. Always check for the latest point release (currently 5.0.11 as of July 2025).
+
+## Security & License Compliance
+- NEVER disable security components (OpenSSL, crypto libraries, security frameworks)
+- Warn about GPLv3 components: "WARNING: GPLv3 licensed. Many companies prohibit GPLv3 in embedded products due to copyleft requirements."
+- Recommend LGPLv2.1, MIT, BSD, or Apache licensed alternatives
+- Use proper git workflow with signed-off commits for kernel modifications
+- Create kernel patches with git format-patch and apply via devtool
+
+## Available Tools
+- list_dir(dir=".") - List directory contents
+- fs_view(path) - Read file contents
+- fs_create(path, content) - Create/overwrite file
+- fs_update(path, find, replace) - Find and replace in file
+- fs_insert(path, line, content) - Insert at line number
+- fs_delete(path, confirm=true) - Delete file
+- exec_command(command, cwd=".") - Execute shell commands (git clone, bitbake, devtool, etc.)
+
+## Command Execution Guidelines
+Use exec_command for essential operations:
+- Repository cloning: git clone git://git.yoctoproject.org/poky.git -b scarthgap
+- Build commands: bitbake core-image-minimal
+- Development tools: devtool add, devtool modify
+- Environment setup: source oe-init-build-env
+- Layer management: bitbake-layers add-layer
+
+## Capabilities
 - File CRUD operations (create, read, update, delete)
 - Code analysis and generation
 - Project structure understanding
 - Multi-file operations
 - Error debugging and fixing
-- Web search for current information
-- Desktop automation when enabled
+- Yocto Project development and BSP creation
+- BitBake syntax and recipe writing
+- Embedded Linux system configuration
 
-Available tools for file operations:
-- **list_dir**: List files in a directory. When user asks to "list directory contents", call list_dir with { dir: "." }
-- **fs_view**: Read a file's contents 
-- **fs_create**, **fs_update**, **fs_insert**, **fs_delete**: For file modifications
-
-When the user asks to list the current directory, call list_dir with { dir: "." }.
+## Response Style
+- Be concise and technical while accessible
+- Provide working code examples and configuration snippets
+- Execute necessary commands to achieve project objectives
+- Explain reasoning behind recommendations
+- Warn about potential issues and compliance requirements
+- Ensure compatibility with current Yocto LTS releases
 
 For complex problems, use <thinking> tags to show your reasoning process if extended thinking is enabled.`;
 
@@ -300,7 +341,7 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
     console.log("openai_service_available: " + !!OpenAIService);
     console.log("openai_api_key_set: " + !!process.env.OPENAI_API_KEY);
     console.log("regex_test: " + `/^gpt-/i.test("${model}")`);
-    
+
     logger.info('Server routing decision', {
       model: model,
       isOpenAI: isOpenAI,
@@ -323,15 +364,15 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       {
         name: 'list_dir',
         description: 'List files and directories in a directory.',
-        input_schema: { 
-          type: 'object', 
-          properties: { 
-            dir: { 
-              type: 'string', 
-              description: 'Directory path to list. Use "." for current directory.', 
-              default: '.' 
-            } 
-          }, 
+        input_schema: {
+          type: 'object',
+          properties: {
+            dir: {
+              type: 'string',
+              description: 'Directory path to list. Use "." for current directory.',
+              default: '.'
+            }
+          },
           required: [],
           additionalProperties: false
         }
@@ -339,14 +380,14 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       {
         name: 'fs_view',
         description: 'Read the contents of a file at an absolute or cwd-relative path.',
-        input_schema: { 
-          type: 'object', 
-          properties: { 
-            path: { 
-              type: 'string', 
-              description: 'File path to read. Absolute or relative to the CLI working dir.' 
-            } 
-          }, 
+        input_schema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'File path to read. Absolute or relative to the CLI working dir.'
+            }
+          },
           required: ['path'],
           additionalProperties: false
         }
@@ -354,12 +395,12 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       {
         name: 'fs_create',
         description: 'Create/overwrite a file with content (<=1MB).',
-        input_schema: { 
-          type: 'object', 
-          properties: { 
-            path: { type: 'string', description: 'File path to create' }, 
-            content: { type: 'string', description: 'File content' } 
-          }, 
+        input_schema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File path to create' },
+            content: { type: 'string', description: 'File content' }
+          },
           required: ['path', 'content'],
           additionalProperties: false
         }
@@ -367,13 +408,13 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       {
         name: 'fs_update',
         description: 'Find & replace text in a file.',
-        input_schema: { 
-          type: 'object', 
-          properties: { 
-            path: { type: 'string', description: 'File path to update' }, 
-            find: { type: 'string', description: 'Text to find' }, 
-            replace: { type: 'string', description: 'Replacement text' } 
-          }, 
+        input_schema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File path to update' },
+            find: { type: 'string', description: 'Text to find' },
+            replace: { type: 'string', description: 'Replacement text' }
+          },
           required: ['path', 'find', 'replace'],
           additionalProperties: false
         }
@@ -381,13 +422,13 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       {
         name: 'fs_insert',
         description: 'Insert content at a 1-based line number.',
-        input_schema: { 
-          type: 'object', 
-          properties: { 
-            path: { type: 'string', description: 'File path to modify' }, 
-            line: { type: 'integer', minimum: 1, description: '1-based line number' }, 
-            content: { type: 'string', description: 'Content to insert' } 
-          }, 
+        input_schema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File path to modify' },
+            line: { type: 'integer', minimum: 1, description: '1-based line number' },
+            content: { type: 'string', description: 'Content to insert' }
+          },
           required: ['path', 'line', 'content'],
           additionalProperties: false
         }
@@ -395,12 +436,12 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       {
         name: 'fs_delete',
         description: 'Delete a file. Use only with user confirmation.',
-        input_schema: { 
-          type: 'object', 
-          properties: { 
-            path: { type: 'string', description: 'File path to delete' }, 
-            confirm: { type: 'boolean', description: 'Confirmation that deletion is intended' } 
-          }, 
+        input_schema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File path to delete' },
+            confirm: { type: 'boolean', description: 'Confirmation that deletion is intended' }
+          },
           required: ['path', 'confirm'],
           additionalProperties: false
         }
@@ -408,26 +449,35 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       {
         name: 'exec_command',
         description: 'Execute shell commands like git clone, bitbake, devtool, etc. Essential for Yocto project setup and builds.',
-        input_schema: { 
-          type: 'object', 
-          properties: { 
+        input_schema: {
+          type: 'object',
+          properties: {
             command: { type: 'string', description: 'Shell command to execute (e.g., "git clone git://git.yoctoproject.org/poky.git")' },
             cwd: { type: 'string', description: 'Working directory for command execution', default: '.' }
-          }, 
+          },
           required: ['command'],
           additionalProperties: false
         }
       }
     ];
 
-    // Build tools for this request
+    // Build tools for this request using unified tool definitions
     const requestTools = [...tools];
 
     if (isOpenAI) {
-      // Use function-calling tools
+      // Use function-calling tools for OpenAI
       fileToolsForOpenAI.forEach(t => requestTools.push(t));
     } else {
-      // Anthropic text editor tool
+      // Use unified tools for Anthropic, converted to Anthropic format
+      const anthropicTools = fileToolsForOpenAI.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.input_schema
+      }));
+
+      anthropicTools.forEach(t => requestTools.push(t));
+
+      // Keep legacy text editor tool for backward compatibility
       if (!requestTools.some(t => t.name === 'str_replace_based_edit_tool')) {
         requestTools.push({ type: 'text_editor_20250728', name: 'str_replace_based_edit_tool' });
       }
@@ -605,17 +655,15 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
 
       stream.on('tool_use', async (toolUse) => {
         try {
-          if (toolUse.name === 'str_replace_based_edit_tool') {
-            logger.info('Processing text editor tool use in streaming mode', { 
-              toolId: toolUse.id,
-              command: toolUse.input.command,
-              sessionId 
-            });
-            
-            const toolResult = await delegateTextEditorToClient(sessionId, toolUse.input);
-            res.write(`data: ${JSON.stringify({ type: 'tool_result', toolId: toolUse.id, result: toolResult })}\n\n`);
-            logger.info('Tool operation completed', { toolId: toolUse.id, result: toolResult });
-          }
+          logger.info('Processing tool use in streaming mode', {
+            toolId: toolUse.id,
+            toolName: toolUse.name,
+            sessionId
+          });
+
+          const toolResult = await handleToolUse(toolUse, sessionId, 'anthropic');
+          res.write(`data: ${JSON.stringify({ type: 'tool_result', toolId: toolUse.id, result: toolResult })}\n\n`);
+          logger.info('Tool operation completed', { toolId: toolUse.id, toolName: toolUse.name });
         } catch (error) {
           logger.error('Tool use error in streaming:', error);
           res.write(`data: ${JSON.stringify({ type: 'error', error: `Tool operation failed: ${error.message}` })}\n\n`);
@@ -711,18 +759,18 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
     } else {
       // Handle regular Anthropic response with tool use support
       const response = await AnthropicService.createMessage(requestData);
-      
+
       // Process tool uses if present
       let processedResponse = response;
       const sessionId = req.headers['x-session-id'] || `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
+
       if (response.content && Array.isArray(response.content)) {
         for (const block of response.content) {
-          if (block.type === 'tool_use' && block.name === 'str_replace_based_edit_tool') {
+          if (block.type === 'tool_use') {
             try {
-              // Delegate text editor operations to client
-              const toolResult = await delegateTextEditorToClient(sessionId, block.input);
-              
+              // Use unified tool handler
+              const toolResult = await handleToolUse(block, sessionId, 'anthropic');
+
               // Continue conversation with tool result
               const toolResponse = await AnthropicService.createMessage({
                 ...requestData,
@@ -744,7 +792,7 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
                   }
                 ]
               });
-              
+
               processedResponse = toolResponse;
             } catch (error) {
               logger.error('Tool delegation error:', error);
@@ -753,7 +801,7 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
           }
         }
       }
-      
+
       // Extract response text from content array
       let responseText = '';
       if (processedResponse.content && Array.isArray(processedResponse.content)) {
@@ -770,9 +818,9 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
       }
 
       // Extract tool uses and citations if present
-      const toolUses = processedResponse.content ? 
+      const toolUses = processedResponse.content ?
         processedResponse.content.filter(block => block.type === 'tool_use') : [];
-      
+
       const citations = [];
       if (processedResponse.content) {
         processedResponse.content.forEach(block => {
@@ -796,11 +844,11 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
 
   } catch (error) {
     logger.error('Chat endpoint error:', error);
-    
+
     // Handle specific Anthropic API errors
     let statusCode = 500;
     let errorMessage = 'AI service error';
-    
+
     if (error.status) {
       statusCode = error.status;
       switch (error.status) {
@@ -840,7 +888,7 @@ For complex problems, use <thinking> tags to show your reasoning process if exte
 router.get('/history', async (req, res) => {
   try {
     const { limit = 50, offset = 0, yoctoOnly = false } = req.query;
-    
+
     // This would typically come from a database
     // For now, return empty array as placeholder
     res.json({
@@ -1159,37 +1207,35 @@ Create a complete, production-ready Yocto project structure that includes all ne
 
       stream.on('tool_use', async (toolUse) => {
         try {
-          if (toolUse.name === 'str_replace_based_edit_tool') {
-            logger.info('Processing text editor tool use for project generation', { 
-              toolId: toolUse.id,
-              command: toolUse.input.command,
-              sessionId 
-            });
-            
-            // Delegate to client
-            const toolResult = await delegateTextEditorToClient(sessionId, toolUse.input);
-            
-            // Send tool result back to stream
-            res.write(`data: ${JSON.stringify({ 
-              type: 'tool_result', 
-              toolId: toolUse.id,
-              result: toolResult 
-            })}\n\n`);
-            
-            logger.info('Tool operation completed for project generation', { toolId: toolUse.id });
-          }
+          logger.info('Processing tool use for project generation', {
+            toolId: toolUse.id,
+            toolName: toolUse.name,
+            sessionId
+          });
+
+          // Use unified tool handler
+          const toolResult = await handleToolUse(toolUse, sessionId, 'anthropic');
+
+          // Send tool result back to stream
+          res.write(`data: ${JSON.stringify({
+            type: 'tool_result',
+            toolId: toolUse.id,
+            result: toolResult
+          })}\n\n`);
+
+          logger.info('Tool operation completed for project generation', { toolId: toolUse.id, toolName: toolUse.name });
         } catch (error) {
           logger.error('Tool use error in project generation streaming:', error);
-          res.write(`data: ${JSON.stringify({ 
-            type: 'error', 
-            error: `Tool operation failed: ${error.message}` 
+          res.write(`data: ${JSON.stringify({
+            type: 'error',
+            error: `Tool operation failed: ${error.message}`
           })}\n\n`);
         }
       });
 
       stream.on('end', async (data) => {
-        res.write(`data: ${JSON.stringify({ 
-          type: 'end', 
+        res.write(`data: ${JSON.stringify({
+          type: 'end',
           fullResponse,
           usage: data.usage,
           duration: data.duration
@@ -1206,17 +1252,17 @@ Create a complete, production-ready Yocto project structure that includes all ne
     } else {
       // Handle regular response with tool use support
       const response = await AnthropicService.createMessage(requestData);
-      
+
       // Process tool uses if present
       let processedResponse = response;
-      
+
       if (response.content && Array.isArray(response.content)) {
         for (const block of response.content) {
-          if (block.type === 'tool_use' && block.name === 'str_replace_based_edit_tool') {
+          if (block.type === 'tool_use') {
             try {
-              // Delegate text editor operations to client
-              const toolResult = await delegateTextEditorToClient(sessionId, block.input);
-              
+              // Use unified tool handler
+              const toolResult = await handleToolUse(block, sessionId, 'anthropic');
+
               // Continue conversation with tool result
               const toolResponse = await AnthropicService.createMessage({
                 ...requestData,
@@ -1238,7 +1284,7 @@ Create a complete, production-ready Yocto project structure that includes all ne
                   }
                 ]
               });
-              
+
               processedResponse = toolResponse;
             } catch (error) {
               logger.error('Tool delegation error in project generation:', error);
