@@ -15,7 +15,7 @@ class WebSocketFileClient {
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000; // Start with 1 second
-    
+
     this.setupEventHandlers();
   }
 
@@ -30,7 +30,7 @@ class WebSocketFileClient {
       this.isConnected = true;
       this.reconnectAttempts = 0;
       this.reconnectDelay = 1000;
-      
+
       console.log(chalk.green('🔗 WebSocket connected successfully'));
 
       connection.on('error', (error) => {
@@ -88,9 +88,9 @@ class WebSocketFileClient {
 
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1); // Exponential backoff
-    
+
     console.log(chalk.yellow(`🔄 Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`));
-    
+
     setTimeout(() => {
       this.connect();
     }, delay);
@@ -100,7 +100,7 @@ class WebSocketFileClient {
     try {
       if (message.type === 'utf8') {
         const data = JSON.parse(message.utf8Data);
-        
+
         switch (data.type) {
           case 'registration_success':
             this.handleRegistrationSuccess(data);
@@ -146,13 +146,13 @@ class WebSocketFileClient {
 
   async handleFileOperation(data) {
     const { operationId, operation, params } = data;
-    
+
     try {
       console.log(chalk.blue(`📁 Executing file operation: ${operation}`));
-      
+
       let result;
       switch (operation) {
-        case 'bash_execute':
+        case 'exec':
           result = await this.handleBashExecuteOperation(params);
           break;
         case 'view':
@@ -186,7 +186,7 @@ class WebSocketFileClient {
 
     } catch (error) {
       console.log(chalk.red(`❌ File operation ${operation} failed:`, error.message));
-      
+
       // Send error result back to server
       this.connection.sendUTF(JSON.stringify({
         type: 'operation_error',
@@ -205,21 +205,21 @@ class WebSocketFileClient {
     if (typeof path !== 'string' || path.trim() === '') {
       throw new Error('view: missing required string \'path\'');
     }
-    
+
     const fs = require('fs').promises;
     const resolvedPath = this.localFileService.resolvePath(path);
-    
+
     try {
       const stats = await fs.stat(resolvedPath);
-      
+
       if (stats.isDirectory()) {
         // Handle directory listing
         const result = await this.localFileService.listDirectory(path);
         if (result.success) {
-          const itemsList = result.items.map(item => 
+          const itemsList = result.items.map(item =>
             `${item.type === 'directory' ? 'd' : '-'} ${item.name}`
           ).join('\n');
-          
+
           return {
             success: true,
             type: 'directory',
@@ -256,7 +256,7 @@ class WebSocketFileClient {
   async handleCreateOperation(params) {
     const { path, file_text } = params;
     await this.localFileService.createFile(path, file_text);
-    
+
     return {
       success: true,
       message: 'File created successfully',
@@ -268,7 +268,7 @@ class WebSocketFileClient {
   async handleStringReplaceOperation(params) {
     const { path, old_str, new_str } = params;
     const result = await this.localFileService.stringReplace(path, old_str, new_str);
-    
+
     return {
       success: true,
       message: 'Text replaced successfully',
@@ -280,7 +280,7 @@ class WebSocketFileClient {
   async handleInsertOperation(params) {
     const { path, new_str, insert_line } = params;
     const result = await this.localFileService.insertAtLine(path, new_str, insert_line);
-    
+
     return {
       success: true,
       message: 'Text inserted successfully',
@@ -291,13 +291,13 @@ class WebSocketFileClient {
 
   async handleDeleteOperation(params) {
     const { path, confirm } = params;
-    
+
     if (!confirm) {
       throw new Error('Delete operation requires explicit confirmation');
     }
-    
+
     await this.localFileService.deleteFile(path);
-    
+
     return {
       success: true,
       message: 'File deleted successfully',
@@ -308,27 +308,27 @@ class WebSocketFileClient {
   async handleBashExecuteOperation(params) {
     const { command } = params;
     const { spawn } = require('child_process');
-    
+
     if (!command || typeof command !== 'string') {
       throw new Error('Command parameter is required and must be a string');
     }
-    
+
     return new Promise((resolve, reject) => {
       const child = spawn('bash', ['-c', command], {
         stdio: ['pipe', 'pipe', 'pipe']
       });
-      
+
       let stdout = '';
       let stderr = '';
-      
+
       child.stdout.on('data', (data) => {
         stdout += data.toString();
       });
-      
+
       child.stderr.on('data', (data) => {
         stderr += data.toString();
       });
-      
+
       child.on('close', (code) => {
         if (code === 0) {
           resolve({
@@ -347,7 +347,7 @@ class WebSocketFileClient {
           });
         }
       });
-      
+
       child.on('error', (error) => {
         reject(new Error(`Failed to execute command: ${error.message}`));
       });
